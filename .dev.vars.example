@@ -1,0 +1,17 @@
+# 复制为 .dev.vars 后按需修改（.dev.vars 已被 gitignore，不会提交）。
+# 生产环境中对应 Cloudflare 控制台 → Worker → Settings → Variables and Secrets 里的
+# Secret 类型变量 ADMIN_CREDENTIALS（改完即生效，无需重新部署）。
+#
+# 支持两种等价格式：
+# 1) JSON 数组（推荐，密码可含任意字符）：
+# ADMIN_CREDENTIALS=[{"name":"alice","password":"s3cret"},{"name":"bob","password":"hunter2"}]
+# 2) 每行一条 `name:password` 纯文本：
+# ADMIN_CREDENTIALS=alice:s3cret\nbob:hunter2
+#
+# 数组第一条视为 admin（可删除文档、管理会话），其余为 editor。
+# 进阶：password 字段可存 pbkdf2 哈希（控制台里看不到明文）：
+#   pnpm hash-password   # 交互生成 pbkdf2$迭代$salt$hash
+# ADMIN_CREDENTIALS=[{"name":"alice","password":"pbkdf2$210000$...$..."}]
+
+SITE_NAME=Pages Docs
+SITE_URL=

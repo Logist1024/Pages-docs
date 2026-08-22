@@ -1,0 +1,37 @@
+{
+  "name": "pages-docs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "基于 Cloudflare Workers 的在线编辑文档站：匿名可读（SSR + SEO），登录后在线编辑",
+  "scripts": {
+    "dev": "node scripts/inject-wrangler.mjs && vite dev",
+    "build": "node scripts/inject-wrangler.mjs && vite build",
+    "deploy": "pnpm run build && wrangler deploy",
+    "preview": "vite build && vite preview",
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "hash-password": "node scripts/hash-password.mjs",
+    "cf-typegen": "wrangler types"
+  },
+  "dependencies": {
+    "diff": "^9.0.0",
+    "highlight.js": "^11.12.0",
+    "hono": "^4.13.3",
+    "markdown-it": "^15.0.0",
+    "mermaid": "^11.17.0",
+    "vditor": "^3.11.3"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.53.1",
+    "@cloudflare/workers-types": "^5.20260821.1",
+    "typescript": "~5.9.3",
+    "vite": "^8.2.2",
+    "vitest": "^3.2.4",
+    "wrangler": "^4.125.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "packageManager": "pnpm@11.7.0"
+}

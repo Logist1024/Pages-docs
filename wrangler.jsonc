@@ -1,0 +1,54 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pages-docs",
+  "main": "src/server/index.ts",
+  "compatibility_date": "2026-08-21",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "assets": {
+    "binding": "ASSETS",
+    "not_found_handling": "none"
+  },
+  "vars": {
+    "SITE_NAME": "Pages Docs",
+    "SITE_URL": ""
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "pages-docs",
+      "database_id": "__D1_DATABASE_ID__"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "PAGE_CACHE",
+      "id": "__KV_NAMESPACE_ID__"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "__R2_BUCKET_NAME__"
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "LOGIN_LIMITER",
+      "namespace_id": "1001",
+      "simple": {
+        "limit": 10,
+        "period": 60
+      }
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "0 3 * * *"
+    ]
+  },
+  "observability": {
+    "enabled": true
+  }
+}
