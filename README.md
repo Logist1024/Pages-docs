@@ -146,10 +146,12 @@ pnpm dev                         # http://localhost:5173
 
 ```
 浏览器
-  │ ① 匿名读者 GET /docs/guide/intro
+  │ ① 匿名读者 GET /guide/intro
   ▼
 Cloudflare Worker（唯一入口，Hono）
-  ├─ /docs/*      阅读页：D1 取已发布快照 → 服务端渲染完整 HTML → KV/Cache API 缓存
+  ├─ /*           阅读页：D1 取已发布快照 → 服务端渲染完整 HTML → KV/Cache API 缓存
+  │               （文档路径直接映射到站点根路径；旧 /docs/* 链接 301 跳转；
+  │                /admin、/api、/f、/assets 等保留前缀不作为文档路径解析）
   ├─ /api/*       JSON API：登录、站点设置、文档 CRUD、版本、上传、搜索（除登录与设置读取外全部鉴权）
   ├─ /search      公开搜索页（FTS5）
   ├─ /sitemap.xml /robots.txt /feed.xml

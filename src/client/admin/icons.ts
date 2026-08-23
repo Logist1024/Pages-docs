@@ -82,6 +82,11 @@ const ICONS: Record<string, IconDef> = {
       '<path d="m3 11 14-6v14L3 13Z"/><path d="M3 11H2.5A1.5 1.5 0 0 0 1 12.5 1.5 1.5 0 0 0 2.5 14H3"/>' +
       '<path d="M7 14v4a2 2 0 0 0 2 2h1"/><path d="M17 8.5a4 4 0 0 1 0 7"/>',
   },
+  note: {
+    markup:
+      '<path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v7l-5 5H6a2 2 0 0 1-2-2Z"/>' +
+      '<path d="M20 13h-4a2 2 0 0 0-2 2v4"/><path d="M8 8h8"/><path d="M8 12h5"/>',
+  },
 };
 
 /** 返回一个图标元素；name 见 ICONS。size 单位 px，默认 16。 */

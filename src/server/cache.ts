@@ -15,8 +15,9 @@ export interface CachedPage {
 /**
  * 页面缓存版本：SSR 输出结构变化（新增页眉元素 / 页脚 / 主题切换等）时 +1，
  * 旧版本的缓存键立即失联，无需逐条删除即可全局失效，避免访客看到缺元素的旧页面。
+ * v4：文档访问地址去掉 /docs 前缀（页内链接 / canonical / sitemap 全部改为根路径）。
  */
-export const CACHE_VERSION = "v3";
+export const CACHE_VERSION = "v4";
 const KV_PREFIX = `html:${CACHE_VERSION}:`;
 const KV_TTL_SECONDS = 7 * 24 * 3600;
 const CACHE_API_TTL_SECONDS = 60;

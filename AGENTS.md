@@ -24,7 +24,7 @@ Toolchain: Node >= 22, pnpm (pinned via `packageManager`). On this machine `pnpm
 ## Architecture
 
 - Entrypoint: `src/server/index.ts` (Worker `main` in wrangler.jsonc). Route registration happens there; route handlers in `src/server/routes/`.
-- URL map: `/docs/*` SSR reading pages, `/api/*` JSON API (session auth except login), `/search`, `/setup` (env self-check), `/f/*` R2 media, everything else → static assets.
+- URL map: `/*` SSR reading pages (document paths map to the site root; reserved prefixes `/admin`, `/api`, `/assets`, `/f`, plus `/search`, `/setup`, sitemap/robots/feed are not treated as doc paths; legacy `/docs/*` links 301-redirect), `/api/*` JSON API (session auth except login), `/search`, `/setup` (env self-check), `/f/*` R2 media, everything else → static assets.
 - Client has two Vite entries (`vite.config.ts`): `admin.html` → `/admin` SPA, `src/client/read/main.ts` → read-page progressive enhancement. Entry chunks deliberately use **stable unhashed names** (`assets/[name].js`) because SSR HTML references them directly — don't enable hashing for entries.
 - Bindings (`src/server/env.ts`): `DB` (D1, required); `PAGE_CACHE` (KV), `MEDIA` (R2), `LOGIN_LIMITER` are optional — server code must gracefully degrade when they're absent (missing KV falls back to Cache API).
 - Schema migrations are embedded SQL in `src/server/db/migrations.ts`, auto-applied idempotently on first request via `PRAGMA user_version` (`src/server/db/migrate.ts`). There is no `wrangler d1 migrations apply` step; put schema changes in that file.

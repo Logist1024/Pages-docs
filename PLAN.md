@@ -18,10 +18,11 @@
 
 ```
 浏览器
-  │ ① 匿名读者 GET /docs/guide/intro
+  │ ① 匿名读者 GET /guide/intro
   ▼
 Cloudflare Worker（唯一入口，Hono）
-  ├─ /docs/*      阅读页：D1 取已发布 Markdown → 服务端渲染 HTML（SEO）→ KV 页面缓存
+  ├─ /*           阅读页：D1 取已发布 Markdown → 服务端渲染 HTML（SEO）→ KV 页面缓存
+  │               （文档路径直接映射到站点根路径，保留前缀除外）
   ├─ /api/*       JSON API：登录、文档 CRUD、版本、上传、搜索（全部鉴权）
   ├─ /sitemap.xml 从 D1 动态生成
   └─ 其余路径     → Static Assets（Vite 打包的 JS/CSS/字体，不占 CPU 配额）
@@ -140,7 +141,7 @@ CREATE VIRTUAL TABLE documents_fts USING fts5(
 
 ### 4.2 阅读（公开）
 
-`GET /docs/*path`
+`GET /{path}`（文档路径直接映射到站点根路径；旧 `/docs/{path}` 链接 301 跳转）
 → 查 KV 缓存 `html:{path}`，命中直接返回（带 ETag）；
 → 未命中：D1 取 published 文档 → markdown-it 渲染（`html:false`，原始 HTML 一律转义，从根上规避 XSS，无需额外 sanitizer）→ 组装含 `<title>/meta description/canonical/OG 标签` 的完整 HTML → 写 KV → 返回。
 

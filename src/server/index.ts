@@ -89,11 +89,13 @@ registerAdminRoutes(app);
 registerUsageRoutes(app);
 registerUploadRoute(app);
 registerMediaRoute(app);
-registerPagesRoutes(app);
 
 // ---- /admin：管理端 SPA（静态资源 admin.html，经 ASSETS 转发）----
+// 必须先于 registerPagesRoutes 注册：后者包含文档阅读页的通配路由
 app.get("/admin", (c) => serveAdminAsset(c));
 app.get("/admin/", (c) => serveAdminAsset(c));
+
+registerPagesRoutes(app);
 
 async function serveAdminAsset(c: { env: Env; req: { raw: Request } }): Promise<Response> {
   const url = new URL(c.req.raw.url);

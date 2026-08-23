@@ -67,6 +67,20 @@ async function loadVisibleDocs(db: D1Database, loggedIn: boolean): Promise<Docum
   }));
 }
 
+/**
+ * 站点保留路径：由 Worker 功能路由与静态资源占用，不作为文档路径解析。
+ * 文档访问地址已直接映射到站点根路径（无 /docs 前缀），这些前缀下的
+ * 请求一律按 404 处理，避免文档路径遮蔽核心功能。
+ */
+const RESERVED_SEGMENTS = ["admin", "api", "assets", "f"];
+const RESERVED_FILES = ["search", "setup", "favicon.svg", "robots.txt", "sitemap.xml", "feed.xml"];
+
+function isReservedDocPath(path: string): boolean {
+  const lower = path.toLowerCase();
+  if (RESERVED_FILES.includes(lower)) return true;
+  return RESERVED_SEGMENTS.some((seg) => lower === seg || lower.startsWith(`${seg}/`));
+}
+
 async function notFound(env: AppEnv["Bindings"], req: Request, url: URL, path: string): Promise<Response> {
   const settings = await loadSettings(env);
   const html = renderNotFoundPage({
@@ -97,7 +111,7 @@ export function registerPagesRoutes(app: Hono<AppEnv>): void {
         firstPath = null;
       }
     }
-    if (firstPath) return c.redirect(`/docs/${firstPath}`, 302);
+    if (firstPath) return c.redirect(`/${firstPath}`, 302);
     const settings = await loadSettings(env);
     const html = renderMessagePage({
       siteName: settings.siteName,
@@ -113,11 +127,133 @@ export function registerPagesRoutes(app: Hono<AppEnv>): void {
     return c.html(html);
   });
 
-  // GET /docs/*path —— 阅读页（PLAN 4.2）
-  app.get("/docs/*", async (c) => {
+  // GET /docs/*path —— 兼容旧链接：301 跳转到去掉前缀的新地址
+  app.get("/docs", (c) => c.redirect("/", 301));
+  app.get("/docs/*", (c) => {
+    const url = new URL(c.req.url);
+    url.pathname = c.req.path.replace(/^\/docs/, "") || "/";
+    return c.redirect(url.toString(), 301);
+  });
+
+  // GET *path —— 阅读页（PLAN 4.2；文档路径直接映射到站点根路径）
+  // 注意：必须在本函数内所有具名路由之后注册（见文件末尾），否则会遮蔽它们。
+  registerReadingPage(app);
+
+  // GET /search —— 公开搜索页
+  app.get("/search", async (c) => {
     const env = c.env;
     if (!env.DB) return c.redirect("/setup", 302);
-    const rawPath = c.req.path.replace(/^\/docs\/?/, "");
+    const q = (c.req.query("q") ?? "").trim().slice(0, 100);
+    const started = Date.now();
+    const hits = q ? await searchDocuments(env.DB, q) : [];
+    const url = new URL(c.req.url);
+    const user = await getSessionUser(env, c.req.raw);
+    const docs = await loadVisibleDocs(env.DB, user !== null);
+    const folders = await loadFolders(env.DB);
+    const settings = await loadSettings(env);
+    const html = renderSearchPage({
+      siteName: settings.siteName,
+      homeUrl: settings.homeUrl,
+      nav: settings.navLinks,
+      logo: settings.logo,
+      notice: settings.notice,
+      favicon: settings.favicon,
+      footer: settings.footer,
+      theme: themeFromRequest(c.req.raw),
+      user,
+      baseUrl: baseUrlOf(env, url),
+      query: q,
+      hits,
+      tookMs: Date.now() - started,
+      tree: buildTree(docs, folders),
+    });
+    return c.html(html);
+  });
+
+  // GET /sitemap.xml —— 从 D1 动态生成（PLAN 1）
+  app.get("/sitemap.xml", async (c) => {
+    const env = c.env;
+    if (!env.DB) return c.text("service unavailable", 503);
+    const docs = await loadPublishedDocs(env.DB);
+    const base = baseUrlOf(env, new URL(c.req.url));
+    const urls = [
+      `  <url><loc>${base}/</loc></url>`,
+      ...docs.map(
+        (d) =>
+          `  <url><loc>${base}/${esc(d.path)}</loc><lastmod>${new Date(d.updated_at).toISOString()}</lastmod></url>`
+      ),
+    ].join("\n");
+    return c.body(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>`, 200, {
+      "Content-Type": "application/xml; charset=utf-8",
+      "Cache-Control": "public, max-age=3600",
+    });
+  });
+
+  // GET /robots.txt
+  app.get("/robots.txt", async (c) => {
+    const base = baseUrlOf(c.env, new URL(c.req.url));
+    const body = [
+      "User-agent: *",
+      "Allow: /",
+      "Disallow: /admin",
+      "Disallow: /api/",
+      "Disallow: /setup",
+      "",
+      `Sitemap: ${base}/sitemap.xml`,
+      "",
+    ].join("\n");
+    return c.body(body, 200, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=3600" });
+  });
+
+  // GET /feed.xml —— RSS 2.0（最近更新的 20 篇已发布文档）
+  app.get("/feed.xml", async (c) => {
+    const env = c.env;
+    if (!env.DB) return c.text("service unavailable", 503);
+    const base = baseUrlOf(env, new URL(c.req.url));
+    const siteName = (await loadSettings(env)).siteName;
+    const docs = (await loadPublishedDocs(env.DB)).sort((a, b) => b.updated_at - a.updated_at).slice(0, 20);
+    const items = (
+      await Promise.all(
+        docs.map(async (d) => {
+          const record = await getDocByPath(env.DB, d.path);
+          const md = record?.publishedContent ?? "";
+          return `    <item>
+      <title>${esc(d.title)}</title>
+      <link>${base}/${esc(d.path)}</link>
+      <guid isPermaLink="true">${base}/${esc(d.path)}</guid>
+      <pubDate>${new Date(d.updated_at).toUTCString()}</pubDate>
+      <description>${esc(excerptOf(md, 300))}</description>
+    </item>`;
+        })
+      )
+    ).join("\n");
+    return c.body(
+      `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+    <title>${esc(siteName)}</title>
+    <link>${base}/</link>
+    <description>${esc(siteName)} 最近更新</description>
+${items}
+</channel></rss>`,
+      200,
+      { "Content-Type": "application/rss+xml; charset=utf-8", "Cache-Control": "public, max-age=1800" }
+    );
+  });
+}
+
+/**
+ * GET *path —— 阅读页（PLAN 4.2；文档路径直接映射到站点根路径）。
+ * 通配路由必须最后注册：具名路由（/、/search、sitemap/robots/feed、/docs 兼容跳转，
+ * 以及更早在 index.ts 注册的 /admin、/api/*、/f/* 等）优先匹配；
+ * 命中保留前缀时调用 next()，交给框架 notFound（/api/* 因此仍返回 JSON 错误）。
+ */
+function registerReadingPage(app: Hono<AppEnv>): void {
+  app.get("*", async (c, next) => {
+    const env = c.env;
+    if (!env.DB) return c.redirect("/setup", 302);
+    const rawPath = c.req.path.replace(/^\/+/, "");
+    if (isReservedDocPath(rawPath)) return next();
+
     let path: string;
     try {
       path = decodeURIComponent(rawPath).replace(/\/+$/, "");
@@ -240,106 +376,5 @@ export function registerPagesRoutes(app: Hono<AppEnv>): void {
     return new Response(html, {
       headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "private, no-store" },
     });
-  });
-
-  // GET /search —— 公开搜索页
-  app.get("/search", async (c) => {
-    const env = c.env;
-    if (!env.DB) return c.redirect("/setup", 302);
-    const q = (c.req.query("q") ?? "").trim().slice(0, 100);
-    const started = Date.now();
-    const hits = q ? await searchDocuments(env.DB, q) : [];
-    const url = new URL(c.req.url);
-    const user = await getSessionUser(env, c.req.raw);
-    const docs = await loadVisibleDocs(env.DB, user !== null);
-    const folders = await loadFolders(env.DB);
-    const settings = await loadSettings(env);
-    const html = renderSearchPage({
-      siteName: settings.siteName,
-      homeUrl: settings.homeUrl,
-      nav: settings.navLinks,
-      logo: settings.logo,
-      notice: settings.notice,
-      favicon: settings.favicon,
-      footer: settings.footer,
-      theme: themeFromRequest(c.req.raw),
-      user,
-      baseUrl: baseUrlOf(env, url),
-      query: q,
-      hits,
-      tookMs: Date.now() - started,
-      tree: buildTree(docs, folders),
-    });
-    return c.html(html);
-  });
-
-  // GET /sitemap.xml —— 从 D1 动态生成（PLAN 1）
-  app.get("/sitemap.xml", async (c) => {
-    const env = c.env;
-    if (!env.DB) return c.text("service unavailable", 503);
-    const docs = await loadPublishedDocs(env.DB);
-    const base = baseUrlOf(env, new URL(c.req.url));
-    const urls = [
-      `  <url><loc>${base}/</loc></url>`,
-      ...docs.map(
-        (d) =>
-          `  <url><loc>${base}/docs/${esc(d.path)}</loc><lastmod>${new Date(d.updated_at).toISOString()}</lastmod></url>`
-      ),
-    ].join("\n");
-    return c.body(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>`, 200, {
-      "Content-Type": "application/xml; charset=utf-8",
-      "Cache-Control": "public, max-age=3600",
-    });
-  });
-
-  // GET /robots.txt
-  app.get("/robots.txt", async (c) => {
-    const base = baseUrlOf(c.env, new URL(c.req.url));
-    const body = [
-      "User-agent: *",
-      "Allow: /",
-      "Disallow: /admin",
-      "Disallow: /api/",
-      "Disallow: /setup",
-      "",
-      `Sitemap: ${base}/sitemap.xml`,
-      "",
-    ].join("\n");
-    return c.body(body, 200, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=3600" });
-  });
-
-  // GET /feed.xml —— RSS 2.0（最近更新的 20 篇已发布文档）
-  app.get("/feed.xml", async (c) => {
-    const env = c.env;
-    if (!env.DB) return c.text("service unavailable", 503);
-    const base = baseUrlOf(env, new URL(c.req.url));
-    const siteName = (await loadSettings(env)).siteName;
-    const docs = (await loadPublishedDocs(env.DB)).sort((a, b) => b.updated_at - a.updated_at).slice(0, 20);
-    const items = (
-      await Promise.all(
-        docs.map(async (d) => {
-          const record = await getDocByPath(env.DB, d.path);
-          const md = record?.publishedContent ?? "";
-          return `    <item>
-      <title>${esc(d.title)}</title>
-      <link>${base}/docs/${esc(d.path)}</link>
-      <guid isPermaLink="true">${base}/docs/${esc(d.path)}</guid>
-      <pubDate>${new Date(d.updated_at).toUTCString()}</pubDate>
-      <description>${esc(excerptOf(md, 300))}</description>
-    </item>`;
-        })
-      )
-    ).join("\n");
-    return c.body(
-      `<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0"><channel>
-    <title>${esc(siteName)}</title>
-    <link>${base}/</link>
-    <description>${esc(siteName)} 最近更新</description>
-${items}
-</channel></rss>`,
-      200,
-      { "Content-Type": "application/rss+xml; charset=utf-8", "Cache-Control": "public, max-age=1800" }
-    );
   });
 }

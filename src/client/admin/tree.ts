@@ -429,9 +429,9 @@ export function normalizePathInput(input: string): string {
 
 /**
  * 打开新建文档弹窗；folder 指定默认所在目录（如从目录行的「＋」进入）。
- * 支持两种方式指定访问路径：
- *  1. 「所在目录」下拉 + 按标题自动生成文件名（默认）；
- *  2. 直接输入自定义完整路径（可含多级子目录，优先级更高）。
+ * 访问路径 = 「所在目录」锁定的前缀 + 目录下的子路径：
+ * - 前缀随「所在目录」变化，不能手动编辑；
+ * - 子路径留空时按标题自动生成（同名冲突自动追加 -2、-3…）。
  */
 export function openNewDocModal(folder = ""): void {
   let submitting = false;
@@ -441,29 +441,43 @@ export function openNewDocModal(folder = ""): void {
     className: "field-input",
     attrs: { type: "text", placeholder: "文档标题", autocomplete: "off" },
   });
-  const customPathInput = el("input", {
-    className: "field-input field-mono",
-    attrs: { type: "text", placeholder: "留空自动生成；也可自定义，如 guide/getting-started", autocomplete: "off", spellcheck: "false" },
+
+  // 路径前缀由「所在目录」决定，只读展示；输入框仅填写该目录下的子路径
+  const prefixEl = el("span", {
+    className: "path-prefix",
+    attrs: { "aria-hidden": "true" },
   });
+  const subPathInput = el("input", {
+    className: "field-input field-mono path-segment-input",
+    attrs: { type: "text", placeholder: "留空按标题生成；可含子目录", autocomplete: "off", spellcheck: "false" },
+  });
+  const pathGroup = el("div", { className: "path-input-group" }, [prefixEl, subPathInput]);
   const errorLine = el("div", { className: "field-error" });
   const pathPreview = el("div", { className: "path-preview" });
 
   /** 由标题生成候选文件名；纯中文等无 slug 时用随机名 */
   const candidateName = (): string => slugify(titleInput.value) || randomDocName();
 
+  const updatePrefix = (): void => {
+    prefixEl.textContent = folderSelect.value.length > 0 ? `/${folderSelect.value}/` : "/";
+  };
+
+  /** 最终子路径：手动输入优先，否则按标题自动生成 */
+  const resolveSubPath = (): string => {
+    const manual = normalizePathInput(subPathInput.value);
+    return manual.length > 0 ? manual : candidateName();
+  };
+
   const updatePreview = (): void => {
-    const custom = normalizePathInput(customPathInput.value);
-    pathPreview.textContent =
-      custom.length > 0
-        ? `将创建为：/${custom}`
-        : `将创建为：/${joinPath(folderSelect.value, candidateName())}`;
-    // 自定义路径优先时弱化目录下拉，提示用户当前生效的来源
-    folderSelect.disabled = custom.length > 0;
-    folderSelect.classList.toggle("field-dimmed", custom.length > 0);
+    pathPreview.textContent = `将创建为：/${joinPath(folderSelect.value, resolveSubPath())}`;
   };
   titleInput.oninput = updatePreview;
-  folderSelect.onchange = updatePreview;
-  customPathInput.oninput = updatePreview;
+  folderSelect.onchange = () => {
+    updatePrefix();
+    updatePreview();
+  };
+  subPathInput.oninput = updatePreview;
+  updatePrefix();
   updatePreview();
 
   const confirmBtn = el("button", {
@@ -493,16 +507,17 @@ export function openNewDocModal(folder = ""): void {
       submitting = true;
       confirmBtn.disabled = true;
 
-      // 自定义完整路径优先；否则按标题自动生成并在同名冲突时追加 -2、-3… 重试（最多 8 次）
-      const customPath = normalizePathInput(customPathInput.value);
+      // 手动子路径优先；否则按标题自动生成并在同名冲突时追加 -2、-3… 重试（最多 8 次）
+      const folderPath = folderSelect.value;
+      const manual = normalizePathInput(subPathInput.value);
       let candidates: string[];
-      if (customPath.length > 0) {
-        candidates = [customPath];
+      if (manual.length > 0) {
+        candidates = [joinPath(folderPath, manual)];
       } else {
-        const base = joinPath(folderSelect.value, candidateName());
+        const base = joinPath(folderPath, candidateName());
         candidates = [base];
         for (let i = 2; i <= 8; i++) candidates.push(`${base}-${i}`);
-        candidates.push(joinPath(folderSelect.value, randomDocName()));
+        candidates.push(joinPath(folderPath, randomDocName()));
       }
 
       const tryCreate = async (): Promise<void> => {
@@ -534,8 +549,8 @@ export function openNewDocModal(folder = ""): void {
         confirmBtn.disabled = false;
         errorLine.textContent =
           e instanceof ApiError && e.status === 409
-            ? customPath.length > 0
-              ? "该路径已存在，请修改自定义路径"
+            ? manual.length > 0
+              ? "该路径已存在，请修改自定义子路径"
               : "该路径已存在，请换一个标题"
             : errMessage(e);
       });
@@ -548,15 +563,15 @@ export function openNewDocModal(folder = ""): void {
     el("div", { className: "field" }, [
       el("label", { className: "field-label", text: "所在目录" }),
       folderSelect,
-      el("div", { className: "field-hint", text: "不选则为根目录；新目录可先用「新建目录」创建。" }),
+      el("div", { className: "field-hint", text: "决定文档的目录位置；新目录可先用「新建目录」创建。" }),
     ]),
     el("div", { className: "field" }, [
       el("label", { className: "field-label", text: "自定义访问路径（可选）" }),
-      customPathInput,
+      pathGroup,
       pathPreview,
       el("div", {
         className: "field-hint",
-        text: "填写后优先于「所在目录」，可包含多级子目录；仅允许小写字母、数字、-、_ 和 /。",
+        text: "前缀固定为上方所选目录，只能通过更换「所在目录」调整；此处仅填写该目录下的子路径，支持多级（自动隐式创建），留空则按标题生成。",
       }),
     ]),
     errorLine,

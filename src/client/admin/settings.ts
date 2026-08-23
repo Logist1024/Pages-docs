@@ -36,7 +36,7 @@ function createNavRow(list: HTMLElement, initial?: NavLink): NavRowHandle {
   });
   const hrefInput = el("input", {
     className: "field-input field-mono nav-href-input",
-    attrs: { type: "text", placeholder: "/docs/intro 或 https://…", spellcheck: "false", autocomplete: "off" },
+    attrs: { type: "text", placeholder: "/intro 或 https://…", spellcheck: "false", autocomplete: "off" },
   });
   if (initial) {
     labelInput.value = initial.label;
@@ -204,12 +204,12 @@ export function openSiteSettingsModal(): void {
       /* ---- 页眉公告（支持内联 HTML） ---- */
       const noticeTextInput = el("textarea", {
         className: "field-input notice-input",
-        attrs: { rows: "2", autocomplete: "off", placeholder: "留空则不显示公告栏；支持 HTML，如 <strong>重要</strong> 或 <a href=\"/docs/changelog\">更新日志</a>" },
+        attrs: { rows: "2", autocomplete: "off", placeholder: "留空则不显示公告栏；支持 HTML，如 <strong>重要</strong> 或 <a href=\"/changelog\">更新日志</a>" },
       });
       noticeTextInput.value = settings.notice?.text ?? "";
       const noticeLinkInput = el("input", {
         className: "field-input field-mono",
-        attrs: { type: "text", spellcheck: "false", autocomplete: "off", placeholder: "可选链接：/docs/changelog 或 https://…" },
+        attrs: { type: "text", spellcheck: "false", autocomplete: "off", placeholder: "可选链接：/changelog 或 https://…" },
       });
       noticeLinkInput.value = settings.notice?.link ?? "";
 
@@ -384,7 +384,7 @@ export function openSiteSettingsModal(): void {
           el("div", { className: "nav-add-row" }, [addLinkBtn]),
           el("div", {
             className: "field-hint",
-            text: "按顺序展示在网站顶部。站内直接填「/路径」（如 /docs/quick-start），站外输入完整 URL（如 https://example.com）。",
+            text: "按顺序展示在网站顶部。站内直接填「/路径」（如 /quick-start），站外输入完整 URL（如 https://example.com）。",
           }),
         ]),
         errorLine,

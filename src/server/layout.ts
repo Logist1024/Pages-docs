@@ -112,7 +112,7 @@ export interface SiteHeaderOptions {
   siteName: string;
   homeUrl: string;
   nav: NavLink[];
-  /** 当前页面规范路径（如 /docs/guide/intro 或 /search），用于导航高亮；无则传 null */
+  /** 当前页面规范路径（如 /guide/intro 或 /search），用于导航高亮；无则传 null */
   activePath?: string | null;
   /** 是否渲染搜索框（阅读页 / 搜索页） */
   showSearch?: boolean;
@@ -198,7 +198,7 @@ function sidebarHtml(tree: TreeNode[], activePath: string | null): string {  con
         if (node.doc) {
           const cls = node.doc.path === activePath ? " active" : "";
           const badge = node.doc.status === "draft" ? '<span class="badge-draft">草稿</span>' : "";
-          let html = `<li class="tree-doc"><a class="tree-link${cls}" href="/docs/${esc(node.doc.path)}">${esc(
+          let html = `<li class="tree-doc"><a class="tree-link${cls}" href="/${esc(node.doc.path)}">${esc(
             node.doc.title
           )}${badge}</a>`;
           if (node.children.length > 0) {
@@ -261,33 +261,37 @@ export function renderDocPage(o: DocPageOptions): string {
         )}">去编辑</a></div>`
       : "";
   const content = `
-${siteHeaderHtml({
-  siteName: o.siteName,
-  homeUrl: o.homeUrl ?? "/",
-  nav: o.nav ?? [],
-  activePath: `/docs/${o.path}`,
-  showSearch: true,
-  user: o.user,
-  logo: o.logo,
-  notice: o.notice,
-})}
 <div class="page-layout">
   ${sidebarHtml(o.tree, o.path)}
-  <main class="article">
-    ${draftBanner}
-    <h1 class="article-title">${esc(o.title)}</h1>
-    <div class="article-meta">更新于 ${timeTag(o.updatedAt)}${
-      o.updatedBy ? ` · ${esc(o.updatedBy)}` : ""
-    }${o.status === "draft" ? " · 草稿" : ""}</div>
-    <article class="markdown-body">${o.contentHtml}</article>
-    ${editLink ? `<div class="article-footer">${editLink}</div>` : ""}
-  </main>
-  ${tocHtml(o.toc)}
+  <div class="main-column">
+    ${siteHeaderHtml({
+      siteName: o.siteName,
+      homeUrl: o.homeUrl ?? "/",
+      nav: o.nav ?? [],
+      activePath: `/${o.path}`,
+      showSearch: true,
+      user: o.user,
+      logo: o.logo,
+      notice: o.notice,
+    })}
+    <div class="main-column-body">
+      <main class="article">
+        ${draftBanner}
+        <h1 class="article-title">${esc(o.title)}</h1>
+        <div class="article-meta">更新于 ${timeTag(o.updatedAt)}${
+          o.updatedBy ? ` · ${esc(o.updatedBy)}` : ""
+        }${o.status === "draft" ? " · 草稿" : ""}</div>
+        <article class="markdown-body">${o.contentHtml}</article>
+        ${editLink ? `<div class="article-footer">${editLink}</div>` : ""}
+      </main>
+      ${tocHtml(o.toc)}
+    </div>
+  </div>
 </div>`;
   return baseLayout({
     title: `${o.title} · ${o.siteName}`,
     description: o.excerpt,
-    canonicalPath: `/docs/${o.path}`,
+    canonicalPath: `/${o.path}`,
     baseUrl: o.baseUrl,
     siteName: o.siteName,
     content,
@@ -318,33 +322,37 @@ export interface SearchPageOptions {
 export function renderSearchPage(o: SearchPageOptions): string {
   const items = o.hits
     .map(
-      (h) => `<li class="search-hit"><a href="/docs/${esc(h.path)}"><span class="hit-title">${esc(h.title)}</span>
+      (h) => `<li class="search-hit"><a href="/${esc(h.path)}"><span class="hit-title">${esc(h.title)}</span>
       <span class="hit-path">/${esc(h.path)}</span>
       <span class="hit-excerpt">${h.excerpt}</span></a></li>`
     )
     .join("");
   const content = `
-${siteHeaderHtml({
-  siteName: o.siteName,
-  homeUrl: o.homeUrl ?? "/",
-  nav: o.nav ?? [],
-  activePath: "/search",
-  showSearch: true,
-  user: o.user ?? null,
-  logo: o.logo,
-  notice: o.notice,
-})}
 <div class="page-layout">
   ${sidebarHtml(o.tree, null)}
-  <main class="article">
-    <h1 class="article-title">搜索：${esc(o.query)}</h1>
-    <div class="article-meta">${o.hits.length} 条结果 · ${o.tookMs} ms</div>
-    ${
-      o.hits.length === 0
-        ? '<p class="search-empty">没有匹配的文档。试试更短的关键词。</p>'
-        : `<ul class="search-results">${items}</ul>`
-    }
-  </main>
+  <div class="main-column">
+    ${siteHeaderHtml({
+      siteName: o.siteName,
+      homeUrl: o.homeUrl ?? "/",
+      nav: o.nav ?? [],
+      activePath: "/search",
+      showSearch: true,
+      user: o.user ?? null,
+      logo: o.logo,
+      notice: o.notice,
+    })}
+    <div class="main-column-body">
+      <main class="article">
+        <h1 class="article-title">搜索：${esc(o.query)}</h1>
+        <div class="article-meta">${o.hits.length} 条结果 · ${o.tookMs} ms</div>
+        ${
+          o.hits.length === 0
+            ? '<p class="search-empty">没有匹配的文档。试试更短的关键词。</p>'
+            : `<ul class="search-results">${items}</ul>`
+        }
+      </main>
+    </div>
+  </div>
 </div>`;
   return baseLayout({
     title: `搜索 ${o.query} · ${o.siteName}`,
@@ -406,7 +414,7 @@ export function renderNotFoundPage(opts: {
   <div class="nf-card">
     <div class="nf-code" aria-hidden="true">4<span class="nf-code-zero">0</span>4</div>
     <h1 class="nf-title">页面不存在</h1>
-    <p class="nf-desc">没有找到 <code class="nf-path">/docs/${esc(opts.path)}</code>。<br>它可能尚未发布，或路径已变更。</p>
+    <p class="nf-desc">没有找到 <code class="nf-path">/${esc(opts.path)}</code>。<br>它可能尚未发布，或路径已变更。</p>
     <div class="nf-actions">
       <a class="nf-btn nf-btn-primary" href="/">返回首页</a>
       <a class="nf-btn" href="/search">搜索文档</a>

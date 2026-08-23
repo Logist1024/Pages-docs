@@ -1315,3 +1315,103 @@ body.col-resizing { cursor: col-resize !important; user-select: none; }
 .usage-empty-hint { color: var(--text-faint); font-size: 13px; line-height: 1.65; }
 .usage-link { align-self: flex-start; }
 .usage-footnote { margin-top: 16px; color: var(--text-faint); font-size: 12px; }
+
+/* ---------------- 备忘录浮窗（悬浮球 + 可拖拽 / 调大小的便签面板） ---------------- */
+
+/* 悬浮球：默认左下角，可整体拖动；z-index 低于模态框、高于抽屉 */
+.memo-ball {
+  position: fixed;
+  left: 18px;
+  bottom: 18px;
+  width: 46px;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--panel-raised);
+  color: var(--warning);
+  cursor: grab;
+  box-shadow: var(--shadow-md);
+  z-index: 150;
+  touch-action: none;
+  transition: transform 0.15s, box-shadow 0.15s, color 0.15s, border-color 0.15s, background 0.15s;
+}
+.memo-ball:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.memo-ball.active {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+/* 备忘录面板：标题栏拖拽移动，右下角原生手柄调整大小 */
+.memo-panel {
+  position: fixed;
+  left: 18px;
+  bottom: 76px;
+  width: 300px;
+  height: 320px;
+  min-width: 240px;
+  min-height: 200px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 24px);
+  display: none;
+  flex-direction: column;
+  overflow: hidden;
+  resize: both;
+  background: var(--panel-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  z-index: 155;
+}
+.memo-panel.open { display: flex; }
+
+.memo-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 13px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-soft);
+  cursor: grab;
+  user-select: none;
+  flex-shrink: 0;
+  touch-action: none;
+}
+.memo-head .spacer { flex: 1; }
+.memo-title {
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.5px;
+}
+.memo-status {
+  font-family: var(--mono-stack);
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.memo-textarea {
+  flex: 1;
+  width: 100%;
+  border: none;
+  outline: none;
+  resize: none;
+  padding: 10px 12px;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+
+/* 拖拽期间的全局状态 */
+body.memo-dragging { cursor: grabbing !important; user-select: none; }

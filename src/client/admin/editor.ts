@@ -909,7 +909,7 @@ function openMoveRenameModal(): void {
 
   const updatePreview = (): void => {
     const normalized = normalizePathInput(pathInput.value);
-    pathPreview.textContent = `访问地址将变为：/docs/${normalized || "（空）"}`;
+    pathPreview.textContent = `访问地址将变为：/${normalized || "（空）"}`;
   };
   pathInput.oninput = () => {
     pathTouched = true;

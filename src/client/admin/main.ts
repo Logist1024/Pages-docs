@@ -21,6 +21,7 @@ import {
 } from "./editor";
 import { icon } from "./icons";
 import { initHistory } from "./history";
+import { destroyMemo, initMemo } from "./memo";
 import { initSearch } from "./search";
 import { openSiteSettingsModal } from "./settings";
 import { isAdmin, state } from "./state";
@@ -98,6 +99,7 @@ async function boot(): Promise<void> {
 
 function renderLogin(): void {
   if (!appRoot) return;
+  destroyMemo(); // 登出 / 未登录时移除备忘录浮窗
   appRoot.innerHTML = "";
   contentEl = null;
 
@@ -325,6 +327,8 @@ function renderApp(): void {
   }
   route();
   void refreshDocs();
+
+  initMemo(); // 备忘录浮窗（登录后挂载，登出时在 renderLogin 中卸载）
 }
 
 async function doLogout(): Promise<void> {
