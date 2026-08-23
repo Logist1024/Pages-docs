@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Product-docs site as a single Cloudflare Worker (Hono API + SSR reading pages + static assets). Content lives in D1, rendered per-request; "publish" is just a DB pointer change. Full docs: `README.md` (architecture/deploy), `TESTING.md` (manual acceptance on a deployed instance), `PLAN.md` (design decisions).
+Product-docs site as a single Cloudflare Worker (Hono API + SSR reading pages + static assets). Content lives in D1, rendered per-request; "publish" is just a DB pointer change. Full docs: `README.md` (architecture/deploy/tech decisions/cost), `docs/TESTING.md` (manual acceptance on a deployed instance), `docs/ERRORS.md` (stable error-code contract).
 
 ## Commands
 
@@ -15,7 +15,7 @@ Toolchain: Node >= 22, pnpm (pinned via `packageManager`). On this machine `pnpm
 | `pnpm deploy` | Build + `wrangler deploy` (needs wrangler login and real resource IDs) |
 
 - Single test file: `pnpm exec vitest run tree.test.ts`. Note `pnpm test -- <file>` does **not** filter (runs the whole suite).
-- Before finishing TypeScript changes: `pnpm check` then `pnpm test` (~3s total). There is no CI — nothing else will catch breakage.
+- Before finishing TypeScript changes: `pnpm check` then `pnpm test` (~3s total). GitHub Actions CI runs both on push/PR, but verify locally first.
 
 ## Critical: wrangler.jsonc is mutated by dev/build
 

@@ -9,7 +9,7 @@
  * - 409 保存冲突是结构化载荷（ConflictPayload），在其上附加同款 `code` 字段，
  *   原 `error: "conflict"` 字面量保持不变以兼容旧客户端判断。
  *
- * 新增错误时：先在本表登记（含默认中文文案与 HTTP 状态），再到 ERRORS.md 补一行说明。
+ * 新增错误时：先在本表登记（含默认中文文案与 HTTP 状态），再到 docs/ERRORS.md 补一行说明。
  */
 
 export interface ErrorDef {

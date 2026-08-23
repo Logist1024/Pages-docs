@@ -33,12 +33,15 @@
 2. [登录与账号管理](#登录与账号管理)
 3. [本地开发](#本地开发)
 4. [架构与目录](#架构与目录)
-5. [数据与缓存语义](#数据与缓存语义)
-6. [备份与恢复](#备份与恢复)
-7. [安全清单](#安全清单)
-8. [常见问题](#常见问题)
+5. [技术选型与设计决策](#技术选型与设计决策)
+6. [成本与资源额度](#成本与资源额度)
+7. [数据与缓存语义](#数据与缓存语义)
+8. [备份与恢复](#备份与恢复)
+9. [安全清单](#安全清单)
+10. [常见问题](#常见问题)
 
-> 部署后想逐项验收？见 **[TESTING.md](TESTING.md)** · Cloudflare 真机部署与验收测试指南。
+> 部署后想逐项验收？见 **[docs/TESTING.md](docs/TESTING.md)** · Cloudflare 真机部署与验收测试指南。
+> 接口报错排查看 **[docs/ERRORS.md](docs/ERRORS.md)** · 错误码对照手册。
 
 ---
 
@@ -189,6 +192,41 @@ scripts/
 ├── inject-wrangler.mjs  # 构建变量注入（零代码部署的关键）
 └── hash-password.mjs    # PBKDF2 口令哈希生成
 ```
+
+## 技术选型与设计决策
+
+| 层 | 选型 | 说明 |
+|---|---|---|
+| 构建 | Vite + `@cloudflare/vite-plugin` | 一个命令同时构建 Worker 与前端；本地 dev 直接跑 workerd，D1/R2/KV 绑定真实可用 |
+| 服务端 | Hono + TypeScript | 轻量、Workers 原生、中间件齐全 |
+| 数据库 | Cloudflare D1（SQLite） | FTS5 全文检索；Time Travel ≈30 天时点恢复 |
+| 缓存 | Workers KV（可选） | 存渲染好的 HTML，发布时按路径精准失效 |
+| 附件 | R2 | Worker 内 binding 直传直取，零出口流量费 |
+| 编辑器 | Vditor | 源码/即时渲染/所见即所得三模式；粘贴图片钩子接 R2 上传 |
+| 登录 | 控制台 Secret 配置的账号密码 | 无 OAuth；会话存 D1，HttpOnly Cookie |
+
+关键取舍：
+
+- **「发布 = 改一行数据库记录」**：无任何构建环节；内容不在 git 里，靠每日 Cron 备份到 R2 + D1 Time Travel 双保险。
+- **一期不做实时协同**：自动保存 + `base_revision_seq` 冲突检测（409 → diff 对比合并）已覆盖双人编辑场景；
+  未来升级 Yjs + Durable Objects 时表结构不动。
+- **users 表为预留设计**：当前登录凭据来自环境 Secret 不查库；将来升级独立账号/OAuth 时无需迁移。
+- **Markdown 渲染 `html:false`**：原始 HTML 一律转义，从根上规避 XSS，无需额外 sanitizer。
+
+## 成本与资源额度
+
+小流量产品文档（日均 <10 万请求）免费额度基本覆盖。建议开 **Workers Paid（$5/月）**：
+解除 10ms CPU 限制（Markdown 渲染 + 高亮更从容）、更高 D1/KV 配额。
+Static Assets 的静态资源请求免费且不限量，不计入 Workers 请求配额——文档站流量大头（JS/CSS）实际零成本。
+
+| 服务 | 本项目用途 | 免费额度关注点 |
+|---|---|---|
+| Workers | 全部计算：API、SSR、定时备份、登录限流 binding | 免费 10 万请求/天、10ms CPU/请求；Paid $5/月放宽至默认 30s CPU |
+| D1 | 文档/版本/会话/FTS5 索引 | 免费 5GB 存储 + 每日行读写配额，小站充裕；Time Travel ≈30 天时点恢复 |
+| R2 | 图片附件 + 每日备份包 | 免费 10GB 存储；出口流量永久免费（首次开通需绑支付方式） |
+| KV（可选） | 已渲染 HTML 页面缓存 | 读 10 万次/天充足；**写仅 1k 次/天**，只用于发布失效与缓存回填 |
+
+明确不使用：Pages（由 Workers Static Assets 取代）、Zero Trust/Access、Durable Objects（实时协同预留）、Queues / Workflows / Vectorize / Hyperdrive / Workers AI（场景用不上）。
 
 ## 数据与缓存语义
 

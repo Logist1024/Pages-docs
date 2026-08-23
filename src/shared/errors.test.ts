@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ERROR_CODES, errorBody, type ErrorCode } from "./errors";
 
-// 错误码契约回归：注册表完整性 + 响应体形状（ERRORS.md 依赖这些不变量）
+// 错误码契约回归：注册表完整性 + 响应体形状（docs/ERRORS.md 依赖这些不变量）
 describe("ERROR_CODES 注册表", () => {
   const entries = Object.entries(ERROR_CODES) as [ErrorCode, { status: number; message: string }][];
 

@@ -26,7 +26,7 @@ import type {
 
 export class ApiError extends Error {
   readonly status: number;
-  /** 稳定错误码（服务端契约见 ERRORS.md）；网络层/兜底场景由本模块合成 */
+  /** 稳定错误码（服务端契约见 docs/ERRORS.md）；网络层/兜底场景由本模块合成 */
   readonly code: string | null;
   readonly body: unknown;
 
@@ -39,7 +39,7 @@ export class ApiError extends Error {
   }
 }
 
-/** 从任意异常中提取可展示的文案（永不静默失败）。附带稳定错误码便于对照 ERRORS.md 排查 */
+/** 从任意异常中提取可展示的文案（永不静默失败）。附带稳定错误码便于对照 docs/ERRORS.md 排查 */
 export function errMessage(e: unknown): string {
   if (e instanceof ApiError) {
     const base = e.message || `请求失败（HTTP ${e.status}）`;
@@ -75,7 +75,7 @@ function extractErrorMessage(body: unknown): string | null {
   return null;
 }
 
-/** 服务端标准错误响应携带的稳定错误码（ERRORS.md 契约） */
+/** 服务端标准错误响应携带的稳定错误码（docs/ERRORS.md 契约） */
 function extractErrorCode(body: unknown): string | null {
   if (body !== null && typeof body === "object" && "code" in body) {
     const v = (body as { code: unknown }).code;

@@ -104,7 +104,7 @@ async function serveAdminAsset(c: { env: Env; req: { raw: Request } }): Promise<
   return c.env.ASSETS.fetch(request);
 }
 
-// ---- API 404 与全局错误处理（错误码契约见 ERRORS.md）----
+// ---- API 404 与全局错误处理（错误码契约见 docs/ERRORS.md）----
 app.notFound((c) => {
   if (c.req.path.startsWith("/api/")) {
     return fail(c, "SYS_NOT_FOUND");
