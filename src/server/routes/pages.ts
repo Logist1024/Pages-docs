@@ -20,11 +20,19 @@ async function loadSettings(env: AppEnv["Bindings"]): Promise<ResolvedSiteSettin
   return loadSiteSettings(env.DB, env.SITE_NAME);
 }
 
-/** 显式创建的目录（含显示名称）；查询失败时退化为空列表，不阻塞页面渲染 */
+/** 显式创建的目录（含显示名称与排序值）；查询失败时退化为空列表，不阻塞页面渲染 */
 async function loadFolders(db: D1Database): Promise<FolderInfo[]> {
   try {
-    const { results } = await db.prepare("SELECT path, name FROM folders").all<{ path: string; name: string }>();
-    return results.map((r) => ({ path: r.path, name: r.name || r.path.split("/").pop() || r.path }));
+    const { results } = await db.prepare("SELECT path, name, sort_order FROM folders").all<{
+      path: string;
+      name: string;
+      sort_order: number;
+    }>();
+    return results.map((r) => ({
+      path: r.path,
+      name: r.name || r.path.split("/").pop() || r.path,
+      sort_order: r.sort_order ?? 0,
+    }));
   } catch {
     return [];
   }
@@ -32,12 +40,15 @@ async function loadFolders(db: D1Database): Promise<FolderInfo[]> {
 
 async function loadPublishedDocs(db: D1Database): Promise<DocumentSummary[]> {
   const { results } = await db
-    .prepare("SELECT id, path, title, status, updated_by, updated_at FROM documents WHERE status = 'published' ORDER BY path")
+    .prepare(
+      "SELECT id, path, title, status, sort_order, updated_by, updated_at FROM documents WHERE status = 'published' ORDER BY path"
+    )
     .all<{
       id: number;
       path: string;
       title: string;
       status: string;
+      sort_order: number;
       updated_by: string | null;
       updated_at: number;
     }>();
@@ -46,6 +57,7 @@ async function loadPublishedDocs(db: D1Database): Promise<DocumentSummary[]> {
     path: r.path,
     title: r.title,
     status: "published" as const,
+    sort_order: r.sort_order ?? 0,
     updated_at: r.updated_at,
     updated_by: r.updated_by,
   }));
@@ -55,13 +67,22 @@ async function loadPublishedDocs(db: D1Database): Promise<DocumentSummary[]> {
 async function loadVisibleDocs(db: D1Database, loggedIn: boolean): Promise<DocumentSummary[]> {
   if (!loggedIn) return loadPublishedDocs(db);
   const { results } = await db
-    .prepare("SELECT id, path, title, status, updated_by, updated_at FROM documents ORDER BY path")
-    .all<{ id: number; path: string; title: string; status: string; updated_by: string | null; updated_at: number }>();
+    .prepare("SELECT id, path, title, status, sort_order, updated_by, updated_at FROM documents ORDER BY path")
+    .all<{
+      id: number;
+      path: string;
+      title: string;
+      status: string;
+      sort_order: number;
+      updated_by: string | null;
+      updated_at: number;
+    }>();
   return results.map((r) => ({
     id: r.id,
     path: r.path,
     title: r.title,
     status: r.status === "published" ? ("published" as const) : ("draft" as const),
+    sort_order: r.sort_order ?? 0,
     updated_at: r.updated_at,
     updated_by: r.updated_by,
   }));
@@ -72,7 +93,7 @@ async function loadVisibleDocs(db: D1Database, loggedIn: boolean): Promise<Docum
  * 文档访问地址已直接映射到站点根路径（无 /docs 前缀），这些前缀下的
  * 请求一律按 404 处理，避免文档路径遮蔽核心功能。
  */
-const RESERVED_SEGMENTS = ["admin", "api", "assets", "f"];
+const RESERVED_SEGMENTS = ["admin", "api", "assets", "f", "icon"];
 const RESERVED_FILES = ["search", "setup", "favicon.svg", "robots.txt", "sitemap.xml", "feed.xml"];
 
 function isReservedDocPath(path: string): boolean {
@@ -98,10 +119,14 @@ async function notFound(env: AppEnv["Bindings"], req: Request, url: URL, path: s
 }
 
 export function registerPagesRoutes(app: Hono<AppEnv>): void {
-  // GET / —— 跳转到第一篇已发布文档；无文档时显示引导页（PLAN 4.6 引导态）
+  // GET / —— 站点入口：优先跳转站点设置的「首页地址」（访客直接访问根路径时的默认落地页）；
+  // 未配置时回退到第一篇已发布文档；无文档时显示引导页（PLAN 4.6 引导态）
   app.get("/", async (c) => {
     const env = c.env;
     const url = new URL(c.req.url);
+    const settings = await loadSettings(env);
+    const home = settings.homeUrl.trim();
+    if (home.length > 0 && home !== "/") return c.redirect(home, 302);
     let firstPath: string | null = null;
     if (env.DB) {
       try {
@@ -112,7 +137,6 @@ export function registerPagesRoutes(app: Hono<AppEnv>): void {
       }
     }
     if (firstPath) return c.redirect(`/${firstPath}`, 302);
-    const settings = await loadSettings(env);
     const html = renderMessagePage({
       siteName: settings.siteName,
       baseUrl: baseUrlOf(env, url),
@@ -127,13 +151,8 @@ export function registerPagesRoutes(app: Hono<AppEnv>): void {
     return c.html(html);
   });
 
-  // GET /docs/*path —— 兼容旧链接：301 跳转到去掉前缀的新地址
-  app.get("/docs", (c) => c.redirect("/", 301));
-  app.get("/docs/*", (c) => {
-    const url = new URL(c.req.url);
-    url.pathname = c.req.path.replace(/^\/docs/, "") || "/";
-    return c.redirect(url.toString(), 301);
-  });
+  // 旧 /docs/* 链接的兼容跳转已并入通配阅读路由：
+  // 仅当对应路径没有真实文档时才剥离前缀跳转，用户自建的 docs 目录不受影响。
 
   // GET *path —— 阅读页（PLAN 4.2；文档路径直接映射到站点根路径）
   // 注意：必须在本函数内所有具名路由之后注册（见文件末尾），否则会遮蔽它们。
@@ -243,8 +262,8 @@ ${items}
 
 /**
  * GET *path —— 阅读页（PLAN 4.2；文档路径直接映射到站点根路径）。
- * 通配路由必须最后注册：具名路由（/、/search、sitemap/robots/feed、/docs 兼容跳转，
- * 以及更早在 index.ts 注册的 /admin、/api/*、/f/* 等）优先匹配；
+ * 通配路由必须最后注册：具名路由（/、/search、sitemap/robots/feed，
+ * 以及更早在 index.ts 注册的 /admin、/api/*、/f/*、/icon/* 等）优先匹配；
  * 命中保留前缀时调用 next()，交给框架 notFound（/api/* 因此仍返回 JSON 错误）。
  */
 function registerReadingPage(app: Hono<AppEnv>): void {
@@ -297,7 +316,17 @@ function registerReadingPage(app: Hono<AppEnv>): void {
     }
 
     const record = await getDocByPath(env.DB, path);
-    if (!record) return notFound(env, c.req.raw, url, path);
+    if (!record) {
+      // 兼容旧版 /docs/* 链接：仅当该路径下没有真实文档时才剥离前缀跳转。
+      // 用户自建的 docs 目录（如 docs/intro）优先按文档解析，不再被剥离 /docs 前缀。
+      // 用 302 而非 301：跳转与否取决于实时数据，避免浏览器把临时判定缓存成永久规则。
+      if (/^docs(\/|$)/i.test(path)) {
+        const target = new URL(c.req.url);
+        target.pathname = `/${path.replace(/^docs\/?/i, "")}`;
+        return c.redirect(target.toString(), 302);
+      }
+      return notFound(env, c.req.raw, url, path);
+    }
     const { row, publishedContent } = record;
 
     // 权限：草稿仅登录可见（PLAN 1）

@@ -1,6 +1,8 @@
-/** 左侧文档树：目录树构建、折叠展开、新建文档/新建目录模态框。
- *  目录来源有两部分：文档 path 隐式推出的中间段，以及 folders 表里显式创建的空目录。 */
-import type { DocumentSummary, FolderInfo, UpdateFolderInput } from "../../shared/types";
+/** 左侧文档树：目录树构建、折叠展开、新建文档/新建目录模态框、同级排序。
+ *  目录来源有两部分：文档 path 隐式推出的中间段，以及 folders 表里显式创建的空目录。
+ *  排序语义与服务端 src/server/tree.ts 的 compareTreeSiblings 一致：
+ *  先按手动排序值升序，未排序（同值）时目录在前、段名字典序——保证后台与阅读站顺序一致。 */
+import type { DocumentSummary, FolderInfo, TreeOrderItem, UpdateFolderInput } from "../../shared/types";
 import { ApiError, api, errMessage } from "./api";
 import { icon } from "./icons";
 import { joinPath, randomDocName, slugify } from "./slug";
@@ -18,6 +20,8 @@ interface FolderNode {
   path: string;
   /** 显示名称：显式目录用用户设置的名称（任意语言），隐式目录回退为路径段 */
   displayName: string;
+  /** 手动排序值（与文档同级混排，升序在前） */
+  order: number;
   folders: FolderNode[];
   docs: DocumentSummary[];
 }
@@ -95,7 +99,7 @@ function remapExpandedFolders(from: string, to: string): void {
 }
 
 function buildTree(docs: DocumentSummary[]): FolderNode {
-  const root: FolderNode = { name: "", path: "", displayName: "", folders: [], docs: [] };
+  const root: FolderNode = { name: "", path: "", displayName: "", order: 0, folders: [], docs: [] };
 
   const ensureFolder = (fullPath: string): FolderNode => {
     const segments = fullPath.split("/");
@@ -105,7 +109,8 @@ function buildTree(docs: DocumentSummary[]): FolderNode {
       acc = acc.length === 0 ? seg : `${acc}/${seg}`;
       let next = cur.folders.find((f) => f.name === seg);
       if (!next) {
-        next = { name: seg, path: acc, displayName: displayNameFor(acc), folders: [], docs: [] };
+        const meta = state.folders.find((f) => f.path === acc);
+        next = { name: seg, path: acc, displayName: displayNameFor(acc), order: meta?.sort_order ?? 0, folders: [], docs: [] };
         cur.folders.push(next);
       }
       cur = next;
@@ -136,51 +141,223 @@ function navigateToDoc(id: number): void {
   location.hash = target;
 }
 
-function renderFolderNode(node: FolderNode, depth: number, container: HTMLElement): void {
-  // 文件夹在前、叶子在后（docs 已按 path 排序，天然稳定）
-  for (const folder of node.folders) {
-    if (!initialized && depth === 0) expandedFolders.add(folder.path);
-    const expanded = expandedFolders.has(folder.path);
+/* ---------------- 同级排序 ---------------- */
 
-    const childrenBox = el("div", { className: "tree-children" });
-    const row = el("div", {
-      className: expanded ? "tree-folder-row expanded" : "tree-folder-row",
-      attrs: { role: "button", tabindex: "0" },
-    }, [
-      el("span", { className: "tree-caret" }),
-      icon("folder", 15),
-      el("span", { className: "tree-folder-name", text: folder.displayName, attrs: { title: folder.path } }),
-      buildFolderActions(folder),
-    ]);
-    const toggle = (): void => {
-      if (expandedFolders.has(folder.path)) expandedFolders.delete(folder.path);
-      else expandedFolders.add(folder.path);
-      render();
-    };
-    row.onclick = () => toggle();
-    row.onkeydown = (ev) => {
-      if (ev.key === "Enter" || ev.key === " ") {
-        ev.preventDefault();
-        toggle();
-      }
-    };
+type SiblingItem = { kind: "folder"; node: FolderNode } | { kind: "doc"; node: DocumentSummary };
 
-    container.appendChild(row);
-    container.appendChild(childrenBox);
-    if (expanded) renderFolderNode(folder, depth + 1, childrenBox);
+/** 与服务端 compareTreeSiblings 一致：排序值升序 → 目录在前 → 段名字典序 */
+function compareSiblings(a: SiblingItem, b: SiblingItem): number {
+  const ao = a.kind === "folder" ? a.node.order : (a.node.sort_order ?? 0);
+  const bo = b.kind === "folder" ? b.node.order : (b.node.sort_order ?? 0);
+  if (ao !== bo) return ao - bo;
+  const af = a.kind === "folder";
+  const bf = b.kind === "folder";
+  if (af !== bf) return af ? -1 : 1;
+  const labelOf = (i: SiblingItem): string =>
+    i.kind === "folder" ? i.node.name : i.node.path.split("/").pop() || i.node.path;
+  return labelOf(a).localeCompare(labelOf(b), "zh-Hans-CN");
+}
+
+/** 某目录下的直接子项（目录+文档合并），按展示顺序排列 */
+function sortedSiblings(node: FolderNode): SiblingItem[] {
+  const items: SiblingItem[] = [
+    ...node.folders.map((f) => ({ kind: "folder" as const, node: f })),
+    ...node.docs.map((d) => ({ kind: "doc" as const, node: d })),
+  ];
+  return items.sort(compareSiblings);
+}
+
+/** path 的父目录路径（根级返回 ""） */
+function parentOf(path: string): string {
+  const idx = path.lastIndexOf("/");
+  return idx === -1 ? "" : path.slice(0, idx);
+}
+
+interface SiblingEntry {
+  key: string;
+  payload: TreeOrderItem;
+}
+
+/**
+ * 从 state 直接计算某层级的完整子项顺序（提交给排序 API 用）。
+ * 隐式目录（仅由文档路径推出、尚无 folders 行）也一并纳入：
+ * 服务端会用 upsert 为其落库显式行，从而支持对任意目录重新排序。
+ */
+function siblingEntries(parent: string): SiblingEntry[] {
+  const prefix = parent.length > 0 ? `${parent}/` : "";
+  const isDirect = (p: string): boolean =>
+    parent.length === 0 ? !p.includes("/") : p.startsWith(prefix) && !p.slice(prefix.length).includes("/");
+  interface Raw {
+    key: string;
+    order: number;
+    label: string;
+    payload: TreeOrderItem;
   }
+  const raws: Raw[] = [];
+  const seenFolders = new Set<string>();
+  const addFolder = (path: string, order: number): void => {
+    if (seenFolders.has(path)) return;
+    seenFolders.add(path);
+    // 并列时按段名字典序（与渲染侧 compareSiblings 的 labelOf 一致，保证相邻关系一致）
+    raws.push({
+      key: `f:${path}`,
+      order,
+      label: path.split("/").pop() || path,
+      payload: { type: "folder", path },
+    });
+  };
+  for (const f of state.folders) {
+    if (!isDirect(f.path)) continue;
+    addFolder(f.path, f.sort_order ?? 0);
+  }
+  // 文档路径隐式推出的目录（含中间层级）
+  for (const d of state.docs) {
+    const segments = d.path.split("/");
+    segments.pop(); // 最后一段是文件名
+    let acc = "";
+    for (const seg of segments) {
+      acc = acc.length === 0 ? seg : `${acc}/${seg}`;
+      if (!isDirect(acc)) continue;
+      addFolder(acc, 0);
+    }
+  }
+  for (const d of state.docs) {
+    if (!isDirect(d.path)) continue;
+    raws.push({
+      key: `d:${d.id}`,
+      order: d.sort_order ?? 0,
+      label: d.path.split("/").pop() || d.path,
+      payload: { type: "doc", id: d.id },
+    });
+  }
+  // 排序规则与渲染侧 compareSiblings 完全一致：排序值 → 目录在前 → 段名字典序
+  raws.sort((a, b) => {
+    if (a.order !== b.order) return a.order - b.order;
+    const af = a.payload.type === "folder";
+    const bf = b.payload.type === "folder";
+    if (af !== bf) return af ? -1 : 1;
+    return a.label.localeCompare(b.label, "zh-Hans-CN");
+  });
+  return raws.map(({ key, payload }) => ({ key, payload }));
+}
 
-  for (const doc of node.docs) {
-    const isActive = state.currentDocId === doc.id;
-    const row = el("button", {
-      className: isActive ? "tree-doc-row active" : "tree-doc-row",
-      attrs: { type: "button", title: doc.path },
-    }, [
-      el("span", { className: "tree-doc-title", text: doc.title || doc.path }),
-      doc.status === "draft" ? el("span", { className: "badge badge-draft", text: "草稿" }) : null,
-    ]);
-    row.onclick = () => navigateToDoc(doc.id);
-    container.appendChild(row);
+/**
+ * 上移 / 下移一个同级项：本地计算新顺序后全量提交，成功后刷新树。
+ * 目录与文档混排；顺序由服务端落库，后台与阅读站共用。
+ */
+async function moveSibling(item: SiblingItem, dir: -1 | 1): Promise<void> {
+  const parent = parentOf(item.node.path);
+  const key = item.kind === "folder" ? `f:${item.node.path}` : `d:${item.node.id}`;
+  const list = siblingEntries(parent);
+  const idx = list.findIndex((e) => e.key === key);
+  const targetIdx = idx + dir;
+  if (idx < 0 || targetIdx < 0 || targetIdx >= list.length) return;
+  const [moved] = list.splice(idx, 1);
+  list.splice(targetIdx, 0, moved!);
+  try {
+    await api.updateTreeOrder({ parent, items: list.map((e) => e.payload) });
+    await refreshDocs();
+  } catch (e) {
+    toast(`排序失败：${errMessage(e)}`, "error");
+  }
+}
+
+/** 上移/下移按钮组：位于首/尾位置时禁用对应方向 */
+function buildMoveButtons(item: SiblingItem): HTMLElement {
+  const path = item.node.path;
+  const key = item.kind === "folder" ? `f:${path}` : `d:${item.node.id}`;
+  const entries = siblingEntries(parentOf(path));
+  const idx = entries.findIndex((e) => e.key === key);
+
+  const upBtn = el("button", {
+    className: "row-action-btn",
+    attrs: { type: "button", title: "上移", "aria-label": "上移" },
+    onClick: (ev) => {
+      ev.stopPropagation();
+      void moveSibling(item, -1);
+    },
+  });
+  upBtn.appendChild(icon("arrowUp", 13));
+  if (idx <= 0) upBtn.disabled = true;
+
+  const downBtn = el("button", {
+    className: "row-action-btn",
+    attrs: { type: "button", title: "下移", "aria-label": "下移" },
+    onClick: (ev) => {
+      ev.stopPropagation();
+      void moveSibling(item, 1);
+    },
+  });
+  downBtn.appendChild(icon("arrowDown", 13));
+  if (idx < 0 || idx >= entries.length - 1) downBtn.disabled = true;
+
+  const wrap = el("div", { className: "move-actions" }, [upBtn, downBtn]);
+  return wrap;
+}
+
+function renderFolderRow(folder: FolderNode, depth: number, container: HTMLElement): void {
+  if (!initialized && depth === 0) expandedFolders.add(folder.path);
+  const expanded = expandedFolders.has(folder.path);
+
+  const childrenBox = el("div", { className: "tree-children" });
+  const actions = buildFolderActions(folder);
+  actions.insertBefore(buildMoveButtons({ kind: "folder", node: folder }), actions.firstChild);
+  const row = el("div", {
+    className: expanded ? "tree-folder-row expanded" : "tree-folder-row",
+    attrs: { role: "button", tabindex: "0" },
+  }, [
+    el("span", { className: "tree-caret" }),
+    icon("folder", 15),
+    el("span", { className: "tree-folder-name", text: folder.displayName, attrs: { title: folder.path } }),
+    actions,
+  ]);
+  const toggle = (): void => {
+    if (expandedFolders.has(folder.path)) expandedFolders.delete(folder.path);
+    else expandedFolders.add(folder.path);
+    render();
+  };
+  row.onclick = () => toggle();
+  row.onkeydown = (ev) => {
+    if (ev.key === "Enter" || ev.key === " ") {
+      ev.preventDefault();
+      toggle();
+    }
+  };
+
+  container.appendChild(row);
+  container.appendChild(childrenBox);
+  if (expanded) renderFolderNode(folder, depth + 1, childrenBox);
+}
+
+function renderDocRow(doc: DocumentSummary, container: HTMLElement): void {
+  const isActive = state.currentDocId === doc.id;
+  // 行本身是可点击元素（div role=button），内部不能再嵌 button——
+  // 排序动作放在兄弟位置的悬浮层容器里，绝对定位于行右侧
+  const actions = el("div", { className: "row-actions doc-row-actions" }, [buildMoveButtons({ kind: "doc", node: doc })]);
+  const badge = doc.status === "draft" ? el("span", { className: "badge badge-draft", text: "草稿" }) : null;
+  const row = el("div", {
+    className: isActive ? "tree-doc-row active" : "tree-doc-row",
+    attrs: { role: "button", tabindex: "0", title: doc.path },
+  }, [
+    el("span", { className: "tree-doc-title", text: doc.title || doc.path }),
+    badge,
+    actions,
+  ]);
+  row.onclick = () => navigateToDoc(doc.id);
+  row.onkeydown = (ev) => {
+    if (ev.key === "Enter" || ev.key === " ") {
+      ev.preventDefault();
+      navigateToDoc(doc.id);
+    }
+  };
+  container.appendChild(row);
+}
+
+function renderFolderNode(node: FolderNode, depth: number, container: HTMLElement): void {
+  // 目录与文档按同一顺序混排渲染（与服务端阅读页侧栏一致）
+  for (const item of sortedSiblings(node)) {
+    if (item.kind === "folder") renderFolderRow(item.node, depth, container);
+    else renderDocRow(item.node, container);
   }
 }
 

@@ -8,6 +8,7 @@
  *   5. 目录滚动联动（IntersectionObserver）
  *   6. 深色 / 浅色模式切换（写 pd-theme Cookie，SSR 下次直接带主题渲染）
  *   7. 页眉公告栏关闭（localStorage 记忆，按内容去重）
+ *   8. 站外导航项站点图标加载失败时自动隐藏
  */
 import "./read.css";
 import hljs from "highlight.js/lib/common";
@@ -258,6 +259,22 @@ function setupTocSpy(): void {
   // 点击平滑滚动由 CSS scroll-behavior 承担
 }
 
+/**
+ * 站外导航项的站点图标（/icon 代理）加载失败时自动隐藏，
+ * 避免破图占位符破坏导航布局；服务端已内置兜底图标，正常情况不会走到这里。
+ */
+function hideBrokenNavIcons(): void {
+  document.querySelectorAll<HTMLImageElement>("img.nav-site-icon").forEach((img) => {
+    if (img.complete && img.naturalWidth === 0) {
+      img.hidden = true;
+      return;
+    }
+    img.addEventListener("error", () => {
+      img.hidden = true;
+    });
+  });
+}
+
 function boot(): void {
   localizeTimes();
   highlightCode();
@@ -266,6 +283,7 @@ function boot(): void {
   setupDelegatedHandlers();
   setupCopySource();
   dismissRememberedNotice();
+  hideBrokenNavIcons();
   void renderMermaidBlocks();
 }
 

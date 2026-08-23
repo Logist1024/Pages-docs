@@ -37,7 +37,12 @@ export function iconSun(size = 16, cls = "icon"): string {
 
 /** 主题切换：月亮（当前浅色时显示，点击切深色） */
 export function iconMoon(size = 16, cls = "icon"): string {
-  return svg('<path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11Z"/>', cls, size);
+  return svg('<path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 0 0 11 11Z"/>', cls, size);
+}
+
+/** 站外链接外开箭头（导航项右侧） */
+export function iconExternalArrow(size = 11, cls = "icon"): string {
+  return svg('<path d="M7 17 17 7"/><path d="M9 7h8v8"/>', cls, size);
 }
 
 /** 状态图标（/setup 自检页）：通过 / 警告 / 失败 —— 方角对勾 / 实心三角 / 叉 */

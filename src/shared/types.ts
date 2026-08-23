@@ -12,6 +12,8 @@ export interface DocumentSummary {
   path: string;
   title: string;
   status: DocStatus;
+  /** 手动排序值（同级内升序在前；0 为未排序默认值） */
+  sort_order: number;
   updated_at: number; // unix ms
   updated_by: string | null;
 }
@@ -119,6 +121,8 @@ export interface SessionRow {
 export interface FolderInfo {
   path: string;
   name: string;
+  /** 手动排序值（与文档同级混排，升序在前；0 为未排序默认值） */
+  sort_order: number;
 }
 
 /** GET /api/folders · 显式创建的目录（空目录需要持久化；有文档的目录由 path 隐式推出） */
@@ -149,7 +153,7 @@ export interface NoticeBar {
 export interface SiteSettings {
   /** 站点名称；null 表示未自定义（回退部署变量 / 默认值） */
   site_name: string | null;
-  /** 首页地址（logo 点击跳转）；null 表示默认 "/" */
+  /** 首页地址：访客直接访问站点根路径时默认打开的页面，也是点击站点名称的跳转目标；null 表示默认展示第一篇已发布文档 */
   home_url: string | null;
   nav_links: NavLink[];
   /** 网站图标（浏览器标签页）；data:image URI 或站内 /f/ 路径；null 表示默认 favicon */
@@ -177,6 +181,24 @@ export interface UpdateSiteSettingsInput {
 export interface UpdateFolderInput {
   name?: string;
   path?: string;
+}
+
+/* ---------------- 目录与文档排序 ---------------- */
+
+/** 排序项：目录用 path 定位，文档用 id 定位 */
+export type TreeOrderItem =
+  | { type: "folder"; path: string }
+  | { type: "doc"; id: number };
+
+/**
+ * PUT /api/tree/order · 重排某个父目录下的直接子项（目录与文档混排）。
+ * items 必须覆盖该目录下全部直接子项的完整顺序（客户端总是全量提交）；
+ * 未列出的子项由服务端追加到末尾，不会丢失。
+ */
+export interface TreeOrderInput {
+  /** 父目录路径；空字符串表示根层级 */
+  parent: string;
+  items: TreeOrderItem[];
 }
 
 /** /setup 自检结果项 */

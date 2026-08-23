@@ -23,6 +23,8 @@ interface DocRow {
   updated_by: string | null;
   created_at: number;
   updated_at: number;
+  /** 手动排序值；迁移前的旧行或未带该列的查询结果回退为 0 */
+  sort_order?: number;
 }
 
 function toSummary(row: DocRow): DocumentSummary {
@@ -31,6 +33,7 @@ function toSummary(row: DocRow): DocumentSummary {
     path: row.path,
     title: row.title,
     status: row.status === "published" ? "published" : "draft",
+    sort_order: row.sort_order ?? 0,
     updated_at: row.updated_at,
     updated_by: row.updated_by,
   };
@@ -119,6 +122,31 @@ export async function listPublishedPaths(db: D1Database): Promise<string[]> {
   return results.map((r) => r.path);
 }
 
+/**
+ * 新建文档/目录的初始排序值：所在父目录下（documents 与 folders 两表合计）
+ * 现有最大 sort_order + 1，让新建项排在同级末尾而不是插到最前面。
+ * 查询失败回退 1，不阻塞创建。
+ */
+export async function nextSiblingSortOrder(db: D1Database, path: string): Promise<number> {
+  try {
+    const slash = path.indexOf("/");
+    const parent = slash === -1 ? "" : path.slice(0, slash);
+    const prefix = slash === -1 ? "" : `${parent}/`;
+    // 根层级用 instr(path,'/')=0 精确限定直接子项；子层级用前缀匹配（含更深层不影响 MAX 结果的正确性）
+    const where =
+      slash === -1
+        ? "WHERE instr(path, '/') = 0"
+        : "WHERE substr(path, 1, ?) = ?";
+    const bind = (stmt: D1PreparedStatement): D1PreparedStatement =>
+      slash === -1 ? stmt : stmt.bind(prefix.length, prefix);
+    const docRow = await bind(db.prepare(`SELECT COALESCE(MAX(sort_order), 0) AS m FROM documents ${where}`)).first<{ m: number }>();
+    const folderRow = await bind(db.prepare(`SELECT COALESCE(MAX(sort_order), 0) AS m FROM folders ${where}`)).first<{ m: number }>();
+    return Math.max(docRow?.m ?? 0, folderRow?.m ?? 0) + 1;
+  } catch {
+    return 1;
+  }
+}
+
 async function invalidateAllPageCaches(env: AppEnv["Bindings"], extraPaths: string[] = []): Promise<void> {
   try {
     const paths = await listPublishedPaths(env.DB);
@@ -159,7 +187,7 @@ export function registerDocumentRoutes(app: Hono<AppEnv>): void {
   // GET /api/docs —— 全量列表（含草稿，管理端用）
   api.get("/docs", async (c) => {
     const { results } = await c.env.DB.prepare(
-      "SELECT id, path, title, status, revision_seq, current_revision_id, content_md, updated_by, created_at, updated_at FROM documents ORDER BY path"
+      "SELECT id, path, title, status, revision_seq, current_revision_id, content_md, sort_order, updated_by, created_at, updated_at FROM documents ORDER BY path"
     ).all<DocRow>();
     return c.json(results.map(toSummary));
   });
@@ -187,10 +215,11 @@ export function registerDocumentRoutes(app: Hono<AppEnv>): void {
     const now = Date.now();
     try {
       // RETURNING 取新 id：不依赖 meta.last_row_id（D1 生产环境可能返回 null）
+      const sortOrder = await nextSiblingSortOrder(c.env.DB, path);
       const result = await c.env.DB.prepare(
-        "INSERT INTO documents (path, title, status, content_md, revision_seq, updated_by, created_at, updated_at) VALUES (?, ?, 'draft', ?, 0, ?, ?, ?) RETURNING id"
+        "INSERT INTO documents (path, title, status, content_md, revision_seq, sort_order, updated_by, created_at, updated_at) VALUES (?, ?, 'draft', ?, 0, ?, ?, ?, ?) RETURNING id"
       )
-        .bind(path, title, content, user.name, now, now)
+        .bind(path, title, content, sortOrder, user.name, now, now)
         .all<{ id: number }>();
       const id = result.results[0]?.id;
       if (id === undefined) throw new Error("INSERT 未返回 id");

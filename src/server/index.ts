@@ -7,6 +7,7 @@ import { registerAuthRoutes } from "./routes/auth.routes";
 import { registerDocumentRoutes } from "./routes/documents";
 import { registerFolderRoutes } from "./routes/folders";
 import { registerUploadRoute, registerMediaRoute } from "./routes/upload";
+import { registerIconRoutes } from "./routes/icons";
 import { registerSearchRoute, registerAdminRoutes } from "./routes/search";
 import { registerPagesRoutes } from "./routes/pages";
 import { registerSettingsRoutes } from "./routes/settings";
@@ -89,6 +90,8 @@ registerAdminRoutes(app);
 registerUsageRoutes(app);
 registerUploadRoute(app);
 registerMediaRoute(app);
+// 站外导航图标代理：必须在 registerPagesRoutes 之前注册（后者含通配阅读路由）
+registerIconRoutes(app);
 
 // ---- /admin：管理端 SPA（静态资源 admin.html，经 ASSETS 转发）----
 // 必须先于 registerPagesRoutes 注册：后者包含文档阅读页的通配路由

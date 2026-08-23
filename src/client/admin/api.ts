@@ -17,6 +17,7 @@ import type {
   SearchResult,
   SessionRow,
   SiteSettings,
+  TreeOrderInput,
   UpdateDocumentInput,
   UpdateFolderInput,
   UpdateSiteSettingsInput,
@@ -170,6 +171,12 @@ export const api = {
     return request<{ ok: true }>(`/api/folders/${path.split("/").map(encodeURIComponent).join("/")}`, {
       method: "DELETE",
     });
+  },
+
+  /* ---- 排序 ---- */
+  /** 重排某父目录下的直接子项（目录与文档混排；items 为该层级完整新顺序） */
+  updateTreeOrder(input: TreeOrderInput): Promise<{ ok: true; parent: string; ordered: number }> {
+    return request<{ ok: true; parent: string; ordered: number }>("/api/tree/order", jsonInit("PUT", input));
   },
 
   /* ---- 发布 ---- */

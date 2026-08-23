@@ -106,6 +106,10 @@ export const ERROR_CODES = {
   /** 不能把目录移动到它自身内部 */
   FOLDER_MOVE_INTO_SELF: { status: 400, message: "不能把目录移动到它自身内部" },
 
+  /* ---------------- 目录与文档排序 ---------------- */
+  /** 排序请求不合法：父路径错误、条目不属于该层级、重复、超量等（具体原因见 error 文案） */
+  TREE_ORDER_INVALID: { status: 400, message: "排序数据不合法" },
+
   /* ---------------- 上传与媒体 ---------------- */
   /** R2（MEDIA 绑定）未配置，上传/回源不可用 */
   MEDIA_NOT_CONFIGURED: { status: 503, message: "R2 未配置：请在控制台绑定 MEDIA 存储桶（见 /setup）" },

@@ -2,7 +2,7 @@ import type { TocEntry } from "./markdown";
 import type { TreeNode } from "./tree";
 import type { SessionUser } from "./env";
 import type { NavLink, NoticeBar, SearchHit } from "../shared/types";
-import { iconMoon, iconPencil, iconSun, logoMark } from "./icons";
+import { iconExternalArrow, iconMoon, iconPencil, iconSun, logoMark } from "./icons";
 import { isExternalHref, sanitizeTrustedHtml } from "./settings";
 
 export function esc(s: string): string {
@@ -132,6 +132,25 @@ function navItemClass(href: string, activePath: string | null): string {
 }
 
 /**
+ * 站外导航项：左侧自动展示对方站点图标（经同源 /icon/:host 代理抓取，
+ * 规避 CSP img-src 'self' 且不向第三方泄露访客 IP），右侧渲染外开箭头。
+ * host 解析失败时不输出图标（仅保留箭头）。
+ */
+function externalNavIcons(href: string): { icon: string; arrow: string } {
+  let host = "";
+  try {
+    host = new URL(href).hostname;
+  } catch {
+    host = "";
+  }
+  const icon =
+    host.length > 0
+      ? `<img class="nav-site-icon" src="/icon/${esc(host)}" alt="" width="15" height="15" loading="lazy" decoding="async">`
+      : "";
+  return { icon, arrow: `<span class="nav-ext-arrow">${iconExternalArrow(11, "icon")}</span>` };
+}
+
+/**
  * 站点顶部工具栏（全宽、最高层级）：品牌（链接到可配置首页地址）+ 搜索框（左侧）+
  * 一排导航栏（右侧，加粗，后台可配置）+ 深浅色切换。
  * 匿名访客在导航尾部保留低调「登录」入口。公告栏独立由 noticeBarHtml 渲染在内容区上方。
@@ -142,7 +161,10 @@ export function siteHeaderHtml(o: SiteHeaderOptions): string {
       const external = isExternalHref(item.href);
       const attrs = external ? ' target="_blank" rel="noopener noreferrer"' : "";
       const cls = navItemClass(item.href, o.activePath ?? null);
-      return `<a class="${cls}" href="${esc(item.href)}"${attrs}>${esc(item.label)}</a>`;
+      const { icon, arrow } = external ? externalNavIcons(item.href) : { icon: "", arrow: "" };
+      return `<a class="${cls}${external ? " nav-link-ext" : ""}" href="${esc(item.href)}"${attrs}>${icon}<span class="nav-link-label">${esc(
+        item.label
+      )}</span>${arrow}</a>`;
     })
     .join("");
   const loginLink = o.user ? "" : '<a class="header-nav-link nav-login" href="/admin/">登录</a>';

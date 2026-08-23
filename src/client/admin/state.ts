@@ -3,9 +3,9 @@ import type { DocumentSummary, FolderInfo, MeInfo } from "../../shared/types";
 
 export const state = {
   me: null as MeInfo | null,
-  /** 文档列表缓存（服务端已按 path 排序） */
+  /** 文档列表缓存（展示顺序由 sort_order 决定，与服务端排序语义一致） */
   docs: [] as DocumentSummary[],
-  /** 显式创建的空目录（有文档的目录由 docs 的 path 隐式推出） */
+  /** 显式创建的目录（含显示名称与 sort_order；有文档的目录由 docs 的 path 隐式推出） */
   folders: [] as FolderInfo[],
   /** 当前打开的文档 id；null 表示未选中（空状态） */
   currentDocId: null as number | null,

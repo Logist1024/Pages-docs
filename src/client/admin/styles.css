@@ -485,7 +485,7 @@ a:hover { color: var(--primary-hover); }
   white-space: nowrap;
 }
 
-/* 目录行悬停操作（新建文档 / 重命名 / 删除空目录） */
+/* 目录行悬停操作（上移/下移/新建文档/重命名/删除空目录） */
 .row-actions {
   display: none;
   gap: 2px;
@@ -493,7 +493,20 @@ a:hover { color: var(--primary-hover); }
   flex-shrink: 0;
 }
 .tree-folder-row:hover .row-actions,
-.tree-folder-row:focus-within .row-actions { display: inline-flex; }
+.tree-folder-row:focus-within .row-actions,
+.tree-doc-row:hover .doc-row-actions,
+.tree-doc-row:focus-within .doc-row-actions { display: inline-flex; }
+/* 文档行的排序动作悬浮于行右侧（不挤占标题布局） */
+.doc-row-actions { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); }
+.move-actions {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0;
+  margin-right: 3px;
+}
+.move-actions .row-action-btn { padding: 1px 4px; }
+.move-actions .row-action-btn svg { display: block; }
+.row-action-btn[disabled] { opacity: 0.25; cursor: default; pointer-events: none; }
 .row-action-btn {
   display: inline-flex;
   align-items: center;
@@ -512,6 +525,7 @@ a:hover { color: var(--primary-hover); }
 .tree-children { margin-left: 16px; }
 
 .tree-doc-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -526,8 +540,12 @@ a:hover { color: var(--primary-hover); }
   text-align: left;
   font-size: 14px;
   color: var(--text);
+  user-select: none;
 }
 .tree-doc-row:hover { background: rgba(154, 166, 184, 0.08); }
+/* 悬浮排序按钮出现在右侧时给标题让位，避免文字被遮挡 */
+.tree-doc-row:hover .tree-doc-title,
+.tree-doc-row:focus-within .tree-doc-title { padding-right: 48px; }
 .tree-doc-row.active {
   background: var(--primary-soft);
   border-left-color: var(--primary);

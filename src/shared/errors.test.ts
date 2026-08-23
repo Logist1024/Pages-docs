@@ -6,7 +6,7 @@ describe("ERROR_CODES 注册表", () => {
   const entries = Object.entries(ERROR_CODES) as [ErrorCode, { status: number; message: string }][];
 
   it("所有代号全局唯一且为合法格式（大写蛇形 + 已知域前缀）", () => {
-    const domains = ["SYS_", "REQ_", "CSRF_", "ORIGIN_", "AUTH_", "DB_", "DOC_", "REV_", "FOLDER_", "MEDIA_", "UPLOAD_", "SETTINGS_", "NET_"];
+    const domains = ["SYS_", "REQ_", "CSRF_", "ORIGIN_", "AUTH_", "DB_", "DOC_", "REV_", "FOLDER_", "TREE_", "MEDIA_", "UPLOAD_", "SETTINGS_", "NET_"];
     for (const [code] of entries) {
       expect(/^[A-Z][A-Z0-9_]*$/.test(code)).toBe(true);
       expect(domains.some((d) => code.startsWith(d))).toBe(true);

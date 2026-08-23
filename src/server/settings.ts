@@ -1,7 +1,8 @@
 /**
  * 站点设置（site_settings 键值表）：
  * - site_name：站点显示名称，覆盖部署变量 SITE_NAME；
- * - home_url：logo / 首页跳转地址（站内以 / 开头；站外完整 http(s):// URL）；
+ * - home_url：首页地址——访客直接访问站点根路径时默认打开的页面，
+ *   也是 logo / 站点名称的跳转地址（站内以 / 开头；站外完整 http(s):// URL）；
  * - nav_links：顶部导航栏链接数组（JSON 存储）；
  * - favicon：浏览器标签页图标（data:image URI 或站内 /f/ 路径）；
  * - logo：页眉品牌 LOGO 图（data:image URI 或站内 /f/ 路径）；

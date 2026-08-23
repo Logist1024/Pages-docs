@@ -38,6 +38,8 @@ const ICONS: Record<string, IconDef> = {
   check: { markup: '<path d="m5 13 4 4L19 7"/>' },
   chevronDown: { markup: '<path d="m6 9 6 6 6-6"/>' },
   arrowLeft: { markup: '<path d="M19 12H5"/><path d="m11 18-6-6 6-6"/>' },
+  arrowUp: { markup: '<path d="M12 19V5"/><path d="m5 12 7-7 7 7"/>' },
+  arrowDown: { markup: '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>' },
   history: { markup: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>' },
   external: {
     markup:

@@ -122,6 +122,14 @@ CREATE TABLE IF NOT EXISTS site_settings (
   updated_at INTEGER NOT NULL
 )`;
 
+// 手动排序：值越小越靠前；同级内目录/文档混排统一按该字段比较。
+// 历史行默认 0，与「未排序」状态兼容（并列时回退目录在前、段名字典序）。
+const SQL_DOCUMENTS_SORT = `
+ALTER TABLE documents ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`;
+
+const SQL_FOLDERS_SORT = `
+ALTER TABLE folders ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`;
+
 export const MIGRATIONS: Migration[] = [
   {
     version: 1,
@@ -160,6 +168,12 @@ export const MIGRATIONS: Migration[] = [
     // 站点设置（键值对）：site_name / home_url / nav_links(JSON 数组)，
     // 覆盖部署变量 SITE_NAME 的展示值；阅读页 SSR 直接读取。
     statements: [SQL_SITE_SETTINGS].map((s) => s.trim()),
+  },
+  {
+    version: 5,
+    name: "0005_sort_order",
+    // 目录与文档手动排序：后台侧栏与阅读页目录共用同一顺序。
+    statements: [SQL_DOCUMENTS_SORT, SQL_FOLDERS_SORT].map((s) => s.trim()),
   },
 ];
 

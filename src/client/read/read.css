@@ -208,14 +208,25 @@ body {
   border-radius: 1px;
   background: var(--accent);
 }
-/* 站外链接加外开箭头 */
-.header-nav-link[target="_blank"]::before {
-  content: "↗";
-  font-size: 0.72em;
-  margin-right: 0.3em;
-  opacity: 0.65;
-  transform: translateY(-0.15em);
+/* 站外链接：左侧自动展示对方站点图标（同源 /icon 代理），右侧渲染外开箭头 */
+.nav-link-ext { gap: 0.38rem; }
+.nav-site-icon {
+  width: 15px;
+  height: 15px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  /* 图标加载失败时隐藏占位，避免破图图标破坏布局 */
+  font-size: 0;
+  line-height: 0;
 }
+.nav-site-icon[hidden] { display: none; }
+.nav-ext-arrow {
+  display: inline-flex;
+  line-height: 0;
+  opacity: 0.6;
+  transform: translateY(0.5px);
+}
+.header-nav-link:hover .nav-ext-arrow { opacity: 1; }
 .nav-login {
   margin-left: 0.45rem;
   border: 1px solid var(--border-strong);

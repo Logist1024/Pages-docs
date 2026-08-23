@@ -355,7 +355,7 @@ export function openSiteSettingsModal(): void {
           homeInput,
           el("div", {
             className: "field-hint",
-            text: "点击左上角站点名称时跳转的目标。站内直接填「/路径」，站外填写完整 http(s):// URL。",
+            text: "访客直接访问站点根地址时默认打开的页面，也是点击左上角站点名称的跳转目标。站内填「/路径」（如 /guide/start），站外填完整 http(s):// URL；留空则展示第一篇已发布文档。",
           }),
         ]),
         el("div", { className: "settings-section-title", text: "品牌形象" }),
@@ -384,7 +384,7 @@ export function openSiteSettingsModal(): void {
           el("div", { className: "nav-add-row" }, [addLinkBtn]),
           el("div", {
             className: "field-hint",
-            text: "按顺序展示在网站顶部。站内直接填「/路径」（如 /quick-start），站外输入完整 URL（如 https://example.com）。",
+            text: "按顺序展示在网站顶部。站内直接填「/路径」（如 /quick-start），站外输入完整 URL（如 https://example.com）；站外导航项会自动展示对方站点的图标，并在右侧显示外开箭头。",
           }),
         ]),
         errorLine,

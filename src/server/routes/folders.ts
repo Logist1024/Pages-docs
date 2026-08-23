@@ -3,8 +3,8 @@ import type { AppEnv, SessionUser } from "../env";
 import { getSessionUser } from "../auth";
 import { fail } from "../http-error";
 import { isValidDocPath } from "../markdown";
-import { invalidateAllPublishedCaches } from "./documents";
-import type { UpdateFolderInput } from "../../shared/types";
+import { invalidateAllPublishedCaches, nextSiblingSortOrder } from "./documents";
+import type { TreeOrderInput, UpdateFolderInput } from "../../shared/types";
 
 /**
  * 目录管理 API。
@@ -33,14 +33,28 @@ export function registerFolderRoutes(app: Hono<AppEnv>): void {
     c.set("user", user);
     await next();
   });
+  // 目录/文档排序接口（PUT /api/tree/order）同样需要登录
+  api.use("/tree/*", async (c, next) => {
+    const user = await requireUser(c);
+    if (!user) return fail(c, "AUTH_REQUIRED");
+    c.set("user", user);
+    await next();
+  });
 
-  // GET /api/folders —— 显式创建的空目录列表（与隐式目录合并由前端处理）
+  // GET /api/folders —— 显式创建的目录列表（与隐式目录合并由前端处理）
   api.get("/folders", async (c) => {
-    const { results } = await c.env.DB.prepare("SELECT path, name FROM folders ORDER BY path").all<{
+    const { results } = await c.env.DB.prepare("SELECT path, name, sort_order FROM folders ORDER BY path").all<{
       path: string;
       name: string;
+      sort_order: number;
     }>();
-    return c.json({ folders: results.map((r) => ({ path: r.path, name: r.name || r.path.split("/").pop() || r.path })) });
+    return c.json({
+      folders: results.map((r) => ({
+        path: r.path,
+        name: r.name || r.path.split("/").pop() || r.path,
+        sort_order: r.sort_order ?? 0,
+      })),
+    });
   });
 
   // POST /api/folders —— 新建目录（name 为任意语言的显示名称，可省略）
@@ -65,8 +79,11 @@ export function registerFolderRoutes(app: Hono<AppEnv>): void {
     if (doc) return fail(c, "FOLDER_PATH_DOC_TAKEN");
 
     try {
-      await c.env.DB.prepare("INSERT INTO folders (path, name, created_by, created_at) VALUES (?, ?, ?, ?)")
-        .bind(path, name, user.name, Date.now())
+      const sortOrder = await nextSiblingSortOrder(c.env.DB, path);
+      await c.env.DB.prepare(
+        "INSERT INTO folders (path, name, sort_order, created_by, created_at) VALUES (?, ?, ?, ?, ?)"
+      )
+        .bind(path, name, sortOrder, user.name, Date.now())
         .run();
     } catch (error) {
       if (String(error).includes("UNIQUE")) return fail(c, "FOLDER_EXISTS");
@@ -240,6 +257,119 @@ export function registerFolderRoutes(app: Hono<AppEnv>): void {
     }
 
     return c.json({ ok: true as const, path: newPath ?? oldPath, name: newName ?? "" });
+  });
+
+  // PUT /api/tree/order —— 重排某个父目录下的直接子项（目录与文档混排，后台侧栏与阅读页共用此顺序）。
+  // 客户端全量提交该层级的新顺序；未列出的既有子项自动追加到末尾，不会丢失。
+  api.put("/tree/order", async (c) => {
+    const user = c.get("user")!;
+    let body: TreeOrderInput;
+    try {
+      body = (await c.req.json()) as TreeOrderInput;
+    } catch {
+      return fail(c, "REQ_BAD_JSON");
+    }
+
+    const parent = typeof body?.parent === "string" ? body.parent.trim().toLowerCase() : "";
+    // 空字符串表示根层级，合法；非空时按文档路径格式校验
+    if (parent.length > 0 && !isValidDocPath(parent)) return fail(c, "TREE_ORDER_INVALID", "父目录路径不合法");
+    if (!Array.isArray(body?.items)) return fail(c, "TREE_ORDER_INVALID", "items 必须是数组");
+    if (body.items.length === 0) return fail(c, "TREE_ORDER_INVALID", "items 不能为空");
+    if (body.items.length > 500) return fail(c, "TREE_ORDER_INVALID", "一次最多排序 500 个条目");
+
+    const parentPrefix = parent.length > 0 ? `${parent}/` : "";
+    const isDirectChild = (p: string): boolean =>
+      parent.length === 0 ? !p.includes("/") : p.startsWith(parentPrefix) && !p.slice(parentPrefix.length).includes("/");
+
+    type Entry = { type: "folder"; path: string; id: number | null } | { type: "doc"; path: string; id: number };
+    const entries: Entry[] = [];
+    const seen = new Set<string>();
+    for (const [index, raw] of body.items.entries()) {
+      if (raw === null || typeof raw !== "object") {
+        return fail(c, "TREE_ORDER_INVALID", `第 ${index + 1} 项格式不正确`);
+      }
+      const item = raw as { type?: unknown; path?: unknown; id?: unknown };
+      if (item.type === "folder") {
+        const p = typeof item.path === "string" ? item.path.trim().toLowerCase() : "";
+        if (!isValidDocPath(p) || !isDirectChild(p)) {
+          return fail(c, "TREE_ORDER_INVALID", `目录「${p || "(空)"}」不是「${parent || "根目录"}」的直接子项`);
+        }
+        const key = `f:${p}`;
+        if (seen.has(key)) return fail(c, "TREE_ORDER_INVALID", `目录「${p}」重复出现`);
+        seen.add(key);
+        entries.push({ type: "folder", path: p, id: null });
+      } else if (item.type === "doc") {
+        const id = typeof item.id === "number" && Number.isInteger(item.id) && item.id > 0 ? item.id : null;
+        if (id === null) return fail(c, "TREE_ORDER_INVALID", `第 ${index + 1} 项的文档 id 不合法`);
+        const key = `d:${id}`;
+        if (seen.has(key)) return fail(c, "TREE_ORDER_INVALID", `文档 #${id} 重复出现`);
+        seen.add(key);
+        entries.push({ type: "doc", path: "", id });
+      } else {
+        return fail(c, "TREE_ORDER_INVALID", `第 ${index + 1} 项类型不正确`);
+      }
+    }
+
+    // ---- 拉取 parent 下真实的直接子项，校验条目存在性与归属 ----
+    const prefixLen = parentPrefix.length;
+    const docRows =
+      parent.length === 0
+        ? await c.env.DB.prepare("SELECT id, path FROM documents WHERE instr(path, '/') = 0").all<{ id: number; path: string }>()
+        : await c.env.DB.prepare(
+            "SELECT id, path FROM documents WHERE substr(path, 1, ?) = ? AND instr(substr(path, ?), '/') = 0"
+          )
+            .bind(prefixLen, parentPrefix, prefixLen + 1)
+            .all<{ id: number; path: string }>();
+    const folderRows =
+      parent.length === 0
+        ? await c.env.DB.prepare("SELECT path FROM folders WHERE instr(path, '/') = 0").all<{ path: string }>()
+        : await c.env.DB.prepare(
+            "SELECT path FROM folders WHERE substr(path, 1, ?) = ? AND instr(substr(path, ?), '/') = 0"
+          )
+            .bind(prefixLen, parentPrefix, prefixLen + 1)
+            .all<{ path: string }>();
+
+    const docById = new Map(docRows.results.map((r) => [r.id, r]));
+    const docPaths = new Set(docRows.results.map((r) => r.path));
+
+    for (const entry of entries) {
+      if (entry.type === "doc") {
+        const row = docById.get(entry.id);
+        if (!row) return fail(c, "TREE_ORDER_INVALID", `文档 #${entry.id} 不存在于「${parent || "根目录"}」下`);
+        entry.path = row.path;
+      } else if (docPaths.has(entry.path)) {
+        return fail(c, "TREE_ORDER_INVALID", `「${entry.path}」是文档而非目录`);
+      }
+    }
+    // 目录条目无需预先存在：隐式目录（仅由文档路径推出）排序时自动落库为显式行
+
+    // ---- 未列出的既有子项追加到末尾（防御客户端漏交） ----
+    const listedFolders = new Set(entries.filter((e) => e.type === "folder").map((e) => e.path));
+    const listedDocs = new Set(entries.filter((e) => e.type === "doc").map((e) => e.id));
+    for (const f of folderRows.results) {
+      if (!listedFolders.has(f.path)) entries.push({ type: "folder", path: f.path, id: null });
+    }
+    for (const d of docRows.results) {
+      if (!listedDocs.has(d.id)) entries.push({ type: "doc", path: d.path, id: d.id });
+    }
+
+    // ---- 写入：sort_order 即列表下标；缺失的目录行用 upsert 落库（幂等） ----
+    const now = Date.now();
+    const stmts = entries.map((entry, idx) => {
+      if (entry.type === "doc") {
+        return c.env.DB.prepare("UPDATE documents SET sort_order = ? WHERE id = ?").bind(idx, entry.id);
+      }
+      return c.env.DB.prepare(
+        "INSERT INTO folders (path, name, sort_order, created_by, created_at) VALUES (?, '', ?, ?, ?)\n" +
+          "ON CONFLICT(path) DO UPDATE SET sort_order = excluded.sort_order"
+      ).bind(entry.path, idx, user.name, now);
+    });
+    if (stmts.length > 0) await c.env.DB.batch(stmts);
+
+    // 侧栏顺序出现在所有阅读页上 → 全量失效已发布页缓存
+    await invalidateAllPublishedCaches(c.env);
+
+    return c.json({ ok: true as const, parent, ordered: entries.length });
   });
 
   app.route("/api", api);
