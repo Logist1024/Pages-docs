@@ -363,13 +363,34 @@ function ensureVditor(): Promise<void> {
             return null;
           },
         },
-        after: () => resolve(),
+        after: () => {
+          stripPreviewCopyButtons();
+          resolve();
+        },
         input: () => markDirty(),
       });
       setupSplitResizer();
     });
   }
   return vditorReady;
+}
+
+/**
+ * 移除预览面板的「复制到公众号 / 复制到知乎」按钮：
+ * preview.actions 已排除二者，这里对 DOM 再做一次兜底清理（并把
+ * 「Mobile/Wechat」文案改为「Mobile」），避免版本差异导致入口残留。
+ */
+function stripPreviewCopyButtons(): void {
+  if (!vditorMount) return;
+  vditorMount
+    .querySelectorAll<HTMLButtonElement>(
+      '.vditor-preview__action button[data-type="mp-wechat"], .vditor-preview__action button[data-type="zhihu"]'
+    )
+    .forEach((btn) => btn.remove());
+  const mobileBtn = vditorMount.querySelector<HTMLButtonElement>(
+    '.vditor-preview__action button[data-type="mobile"]'
+  );
+  if (mobileBtn && mobileBtn.textContent !== "Mobile") mobileBtn.textContent = "Mobile";
 }
 
 /* ---------------- 编辑区 / 预览区分屏拖拽 ---------------- */

@@ -93,8 +93,12 @@ function makeDraggable(target: HTMLElement, handle: HTMLElement, posKey: string,
 
   handle.addEventListener("pointerdown", (ev) => {
     if (ev.button !== 0) return;
-    // 面板标题栏内的按钮（关闭等）正常点击，不进入拖拽
-    if ((ev.target as HTMLElement | null)?.closest("button")) return;
+    // 面板标题栏内的按钮（关闭等）正常点击，不进入拖拽；
+    // 注意悬浮球本身就是 <button>，不能因此被排除
+    if (!handle.matches("button")) {
+      const btn = (ev.target as HTMLElement | null)?.closest("button");
+      if (btn) return;
+    }
     ev.preventDefault();
     handle.setPointerCapture(ev.pointerId);
     active = true;
@@ -180,13 +184,17 @@ function setOpen(next: boolean): void {
   if (!panel) return;
   panel.classList.toggle("open", next);
   if (next) {
-    // 面板默认出现在悬浮球上方；无保存尺寸时先给一次合理大小
+    // 先恢复上次尺寸，再恢复位置（位置钳制依赖当前尺寸）
     const savedSize = readStore<Size>(PANEL_SIZE_KEY);
     if (savedSize && Number.isFinite(savedSize.w) && Number.isFinite(savedSize.h)) {
       panel.style.width = `${clampSize(savedSize.w, PANEL_MIN_W)}px`;
       panel.style.height = `${clampSize(savedSize.h, PANEL_MIN_H)}px`;
     }
-    if (readStore<Point>(PANEL_POS_KEY) === null && ball) {
+    const savedPos = readStore<Point>(PANEL_POS_KEY);
+    if (savedPos && Number.isFinite(savedPos.x) && Number.isFinite(savedPos.y)) {
+      placeAt(panel, clampToViewport(savedPos, panel.offsetWidth, panel.offsetHeight));
+    } else if (ball) {
+      // 首次打开：面板默认出现在悬浮球上方
       const rect = ball.getBoundingClientRect();
       placeAt(panel, clampToViewport({ x: rect.left, y: rect.top - panel.offsetHeight - 10 }, panel.offsetWidth, panel.offsetHeight));
     }
@@ -256,6 +264,13 @@ export function initMemo(): void {
   document.body.appendChild(panel);
 
   makeDraggable(ball, ball, BALL_POS_KEY, () => setOpen(!openState));
+  // 键盘可达性：Enter / 空格切换展开（拖拽用 pointer 事件处理，与 click 解耦）
+  ball.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" || ev.key === " ") {
+      ev.preventDefault();
+      setOpen(!openState);
+    }
+  });
   makeDraggable(panel, head, PANEL_POS_KEY);
 
   // 原生 resize 手柄（右下角）调整面板大小；尺寸变化时跟随记录

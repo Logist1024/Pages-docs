@@ -242,10 +242,10 @@ function renderApp(): void {
     searchBox,
     el("div", { className: "topbar-right" }, [
       userChip,
+      logoutBtn,
       isAdmin() ? settingsBtn : null,
       el("a", { className: "view-site-link", text: "查看站点", attrs: { href: "/", target: "_blank", rel: "noopener" } }),
       themeBtn,
-      logoutBtn,
     ]),
   ]);
 
@@ -326,7 +326,8 @@ function renderApp(): void {
     window.addEventListener("hashchange", route);
   }
   route();
-  void refreshDocs();
+  // 文档列表就绪后重跑一次路由：#/doc-by-path/... 深链接需要列表才能定位
+  void refreshDocs().then(() => route());
 
   initMemo(); // 备忘录浮窗（登录后挂载，登出时在 renderLogin 中卸载）
 }
@@ -416,6 +417,29 @@ function route(): void {
     }
     setEditorVisible(false);
     if (contentEl) showUsageView(contentEl, true);
+    return;
+  }
+
+  /* 阅读页「编辑此页」的按路径深链接：定位到对应文档 */
+  const byPath = /^#\/doc-by-path\/(.+)$/.exec(location.hash);
+  if (byPath) {
+    // 文档列表尚未就绪（刚登录 / 首次进入）：等 refreshDocs 完成后重入
+    if (state.docs.length === 0) return;
+    let targetPath = byPath[1];
+    try {
+      targetPath = decodeURIComponent(targetPath);
+    } catch {
+      // 编码异常时保持原值参与匹配
+    }
+    const doc =
+      state.docs.find((d) => d.path === targetPath) ??
+      state.docs.find((d) => d.path.toLowerCase() === targetPath.toLowerCase());
+    if (doc) {
+      location.hash = `#/doc/${doc.id}`;
+    } else {
+      toast(`未找到路径为 /${targetPath} 的文档`, "error");
+      location.hash = "#/";
+    }
     return;
   }
 
