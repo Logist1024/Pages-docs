@@ -258,9 +258,16 @@ export function registerDocumentRoutes(app: Hono<AppEnv>): void {
     // 两个并发请求只有一个能成功，杜绝互相覆盖导致的静默丢稿。
     // 用 RETURNING 的结果集判断命中，不依赖 meta.changes —— D1 生产环境对该
     // 统计不可靠（可能返回 0/null），曾导致保存成功却误报冲突。
+    //
+    // 注意：id / baseSeq 不走 ? 绑定而是内联——两者都已严格校验为非负整数，
+    // 无注入风险。生产 D1 曾出现「WHERE 里绑定参数与行值肉眼相等却永不命中」
+    // 的怪癖（SELECT 同值可查到），内联整数可绕开参数序列化层的差异。
+    if (!Number.isInteger(baseSeq) || baseSeq < 0 || !Number.isInteger(id) || id <= 0) {
+      return fail(c, "REQ_BAD_PARAM", "id 或 base_revision_seq 不是合法整数");
+    }
     updates.push("revision_seq = revision_seq + 1", "updated_by = ?", "updated_at = ?");
-    binds.push(user.name, Date.now(), baseSeq, id);
-    const updateSql = `UPDATE documents SET ${updates.join(", ")} WHERE id = ? AND revision_seq = ? RETURNING revision_seq`;
+    binds.push(user.name, Date.now());
+    const updateSql = `UPDATE documents SET ${updates.join(", ")} WHERE id = ${id} AND revision_seq = ${baseSeq} RETURNING revision_seq`;
     const runUpdate = (): Promise<D1Result<{ revision_seq: number }>> =>
       c.env.DB.prepare(updateSql)
         .bind(...binds)
@@ -274,7 +281,7 @@ export function registerDocumentRoutes(app: Hono<AppEnv>): void {
     }
 
     if (result.results.length === 0) {
-      // 未命中：区分「真冲突（版本号已被并发请求推进）」与「统计假阴性」
+      // 未命中：区分「真冲突（版本号已被并发请求推进）」与「假阴性」
       const freshRow = await c.env.DB.prepare("SELECT * FROM documents WHERE id = ?").bind(id).first<DocRow>();
       if (!freshRow) return fail(c, "DOC_NOT_FOUND");
       if (freshRow.revision_seq !== baseSeq) {
@@ -289,7 +296,9 @@ export function registerDocumentRoutes(app: Hono<AppEnv>): void {
       }
       if (result.results.length === 0) {
         console.error(
-          `[pages-docs] 条件更新两次未命中但版本号未变：id=${id} base=${baseSeq} server=${freshRow.revision_seq}`
+          `[pages-docs] [DOC_SAVE_NOT_APPLIED] 条件更新两次未命中但版本号未变：` +
+            `id=${id}(number) base=${baseSeq}(number) server=${freshRow.revision_seq} ` +
+            `sql=${updateSql} fieldBindTypes=[${binds.map((b) => typeof b).join(",")}]`
         );
         return fail(c, "DOC_SAVE_NOT_APPLIED");
       }
