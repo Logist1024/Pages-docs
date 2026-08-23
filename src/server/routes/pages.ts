@@ -271,7 +271,8 @@ function registerReadingPage(app: Hono<AppEnv>): void {
     const explicitTheme = themeFromRequest(c.req.raw);
 
     // ---- 匿名请求走缓存；登录请求永远 live 渲染且 no-store ----
-    if (isAnonymous && !url.searchParams.has("view") && !explicitTheme) {
+    // ?format=md（复制源码）不读 HTML 缓存，统一走下方实时输出
+    if (isAnonymous && !url.searchParams.has("view") && !explicitTheme && url.searchParams.get("format") !== "md") {
       if (env.PAGE_CACHE) {
         const cached = await getPageCache(env, path);
         if (cached) {
@@ -318,6 +319,14 @@ function registerReadingPage(app: Hono<AppEnv>): void {
       sourceMd = publishedContent ?? row.content_md;
     } else {
       sourceMd = row.content_md;
+    }
+
+    // ---- ?format=md：直出当前所见的 Markdown 源码（阅读页「复制 Markdown」按钮的数据源）----
+    if (url.searchParams.get("format") === "md") {
+      const headers: Record<string, string> = { "Content-Type": "text/plain; charset=utf-8" };
+      headers["Cache-Control"] =
+        isAnonymous && !previewingDraft && !explicitTheme ? "public, max-age=60" : "private, no-store";
+      return new Response(sourceMd, { headers });
     }
 
     const { html: contentHtml, toc } = renderMarkdown(sourceMd);

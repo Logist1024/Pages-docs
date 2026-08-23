@@ -324,7 +324,26 @@ body {
   margin-bottom: 1.8rem;
   padding-bottom: 1rem;
   border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
 }
+.article-meta .meta-text { flex: 1; min-width: 0; }
+/* 一键复制 Markdown 源码 */
+.copy-src-btn {
+  flex-shrink: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1.4;
+  padding: 0.28rem 0.7rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.copy-src-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
 .article-meta time {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.84rem;

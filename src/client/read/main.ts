@@ -84,6 +84,63 @@ function dismissRememberedNotice(): void {
   }
 }
 
+/** 写入剪贴板：优先 Clipboard API，非安全上下文等场景退回 execCommand */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch {
+      ok = false;
+    }
+    ta.remove();
+    return ok;
+  }
+}
+
+/**
+ * 「复制 Markdown」按钮：抓取当前地址 + ?format=md 的源码文本并复制。
+ * 复制内容与页面所见一致（登录预览草稿时拿到的是草稿源码；
+ * 带 ?view=published 时拿到发布快照）。
+ */
+function setupCopySource(): void {
+  document.addEventListener("click", (ev) => {
+    const target = ev.target as HTMLElement | null;
+    if (!target || typeof target.closest !== "function") return;
+    const btn = target.closest<HTMLButtonElement>("[data-copy-md]");
+    if (!btn || btn.dataset.busy === "1") return;
+
+    const label = btn.dataset.label ?? (btn.dataset.label = btn.textContent?.trim() || "复制 Markdown");
+    btn.dataset.busy = "1";
+    void (async () => {
+      try {
+        const u = new URL(location.href);
+        u.searchParams.set("format", "md");
+        const res = await fetch(u.toString(), { credentials: "same-origin" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const okFlag = await copyText(await res.text());
+        btn.textContent = okFlag ? "已复制" : "复制失败";
+      } catch {
+        btn.textContent = "复制失败";
+      }
+      window.setTimeout(() => {
+        btn.textContent = label;
+        delete btn.dataset.busy;
+      }, 1600);
+    })();
+  });
+}
+
 /** 本地时间 yyyy-MM-dd HH:mm */
 function formatLocal(ms: number): string {
   const d = new Date(ms);
@@ -207,6 +264,7 @@ function boot(): void {
   addCopyButtons();
   setupTocSpy();
   setupDelegatedHandlers();
+  setupCopySource();
   dismissRememberedNotice();
   void renderMermaidBlocks();
 }

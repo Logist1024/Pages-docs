@@ -278,9 +278,9 @@ ${siteHeaderHtml({
       <main class="article">
         ${draftBanner}
         <h1 class="article-title">${esc(o.title)}</h1>
-        <div class="article-meta">更新于 ${timeTag(o.updatedAt)}${
+        <div class="article-meta"><span class="meta-text">更新于 ${timeTag(o.updatedAt)}${
           o.updatedBy ? ` · ${esc(o.updatedBy)}` : ""
-        }${o.status === "draft" ? " · 草稿" : ""}</div>
+        }${o.status === "draft" ? " · 草稿" : ""}</span><button class="copy-src-btn" type="button" data-copy-md title="复制本文 Markdown 源码">复制 Markdown</button></div>
         <article class="markdown-body">${o.contentHtml}</article>
         ${editLink ? `<div class="article-footer">${editLink}</div>` : ""}
       </main>
