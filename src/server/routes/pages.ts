@@ -8,6 +8,7 @@ import { esc, renderDocPage, renderMessagePage, renderNotFoundPage, renderSearch
 import { loadSiteSettings, type ResolvedSiteSettings } from "../settings";
 import { getDocByPath, listPublishedPaths } from "./documents";
 import { searchDocuments } from "./search";
+import { isReservedRoutePath } from "../../shared/reserved-paths";
 import type { DocumentSummary, FolderInfo } from "../../shared/types";
 
 function baseUrlOf(env: AppEnv["Bindings"], url: URL): string {
@@ -90,16 +91,11 @@ async function loadVisibleDocs(db: D1Database, loggedIn: boolean): Promise<Docum
 
 /**
  * 站点保留路径：由 Worker 功能路由与静态资源占用，不作为文档路径解析。
- * 文档访问地址已直接映射到站点根路径（无 /docs 前缀），这些前缀下的
- * 请求一律按 404 处理，避免文档路径遮蔽核心功能。
+ * 文档访问地址已直接映射到站点根路径，这些前缀下的请求一律放行给框架按 404 处理，
+ * 避免文档路径遮蔽核心功能。清单与创建期校验共用 src/shared/reserved-paths.ts。
  */
-const RESERVED_SEGMENTS = ["admin", "api", "assets", "f", "icon"];
-const RESERVED_FILES = ["search", "setup", "favicon.svg", "robots.txt", "sitemap.xml", "feed.xml"];
-
 function isReservedDocPath(path: string): boolean {
-  const lower = path.toLowerCase();
-  if (RESERVED_FILES.includes(lower)) return true;
-  return RESERVED_SEGMENTS.some((seg) => lower === seg || lower.startsWith(`${seg}/`));
+  return isReservedRoutePath(path);
 }
 
 async function notFound(env: AppEnv["Bindings"], req: Request, url: URL, path: string): Promise<Response> {

@@ -35,6 +35,11 @@ export const ERROR_CODES = {
   CSRF_BLOCKED: { status: 403, message: "跨站请求被拒绝" },
   /** Origin 头存在但无法解析 */
   ORIGIN_INVALID: { status: 403, message: "Origin 不合法" },
+  /**
+   * 目标路径为系统保留路径（docs、admin、api、assets、f、icon 及固定页面），
+   * 新建 / 移动文档或目录时拒绝占用，否则创建后永远无法访问。
+   */
+  REQ_RESERVED_PATH: { status: 409, message: "该路径为系统保留路径，不能使用" },
 
   /* ---------------- 认证与会话 ---------------- */
   /** 未登录或会话已过期 */

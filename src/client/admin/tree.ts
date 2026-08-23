@@ -3,6 +3,7 @@
  *  排序语义与服务端 src/server/tree.ts 的 compareTreeSiblings 一致：
  *  先按手动排序值升序，未排序（同值）时目录在前、段名字典序——保证后台与阅读站顺序一致。 */
 import type { DocumentSummary, FolderInfo, TreeOrderItem, UpdateFolderInput } from "../../shared/types";
+import { isReservedCreatePath } from "../../shared/reserved-paths";
 import { ApiError, api, errMessage } from "./api";
 import { icon } from "./icons";
 import { joinPath, randomDocName, slugify } from "./slug";
@@ -33,6 +34,7 @@ export function validateDocPath(path: string): string | null {
   if (!/^[a-z0-9\-_/]+$/.test(p)) return "路径仅允许小写字母、数字、连字符（-）、下划线（_）和斜杠（/）";
   if (p.startsWith("/") || p.endsWith("/")) return "路径不能以 / 开头或结尾";
   if (p.includes("//")) return "路径中不能出现连续的 /";
+  if (isReservedCreatePath(p)) return "该路径为系统保留路径（docs、admin、api、assets、f、icon 等），不能使用";
   if (p.length > 200) return "路径过长（最多 200 字符）";
   return null;
 }
@@ -866,10 +868,17 @@ export function openNewFolderModal(parent = ""): void {
         errorLine.textContent = `访问路径不合法：${segError}`;
         return;
       }
+      // 完整路径（含上级目录）也要过一遍校验：末段本身合法不代表拼出的路径合法
+      //（如根目录下建 docs/admin 等保留路径），并给用户即时反馈而非等服务端 409。
+      const path = joinPath(folderSelect.value, slug);
+      const fullPathError = validateDocPath(path);
+      if (fullPathError !== null) {
+        errorLine.textContent = `完整路径不合法：${fullPathError}`;
+        return;
+      }
 
       submitting = true;
       confirmBtn.disabled = true;
-      const path = joinPath(folderSelect.value, slug);
       api.createFolder({ path, name: displayName })
         .then(async () => {
           toast(`已创建目录「${displayName}」`, "success");

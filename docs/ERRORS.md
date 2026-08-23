@@ -61,6 +61,7 @@
 | `REQ_BAD_PARAM` | 400 | 参数不合法 | id / token_hash 等格式非法 | 检查调用参数；多为前端 bug |
 | `CSRF_BLOCKED` | 403 | 跨站请求被拒绝 | 从第三方页面发起的变更请求（CSRF 防护生效） | 正常防护行为；在本站内操作即可 |
 | `ORIGIN_INVALID` | 403 | Origin 头无法解析 | 代理/网关注入了畸形 Origin | 检查中间层配置 |
+| `REQ_RESERVED_PATH` | 409 | 系统保留路径不能使用 | 新建/移动文档或目录到 `docs`、`admin`、`api`、`assets`、`f`、`icon` 或固定页面（如 `search`）上 | 换一个路径；这些前缀被站点功能占用，创建后也无法访问 |
 
 ### 认证与会话
 

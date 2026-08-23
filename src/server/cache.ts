@@ -17,8 +17,9 @@ export interface CachedPage {
  * 旧版本的缓存键立即失联，无需逐条删除即可全局失效，避免访客看到缺元素的旧页面。
  * v4：文档访问地址去掉 /docs 前缀（页内链接 / canonical / sitemap 全部改为根路径）。
  * v5：站外导航项改为「左侧站点图标 + 右侧外开箭头」结构；/docs 目录不再被旧链接跳转劫持。
+ * v6：移动端折叠控件（目录抽屉 / 站点菜单的 checkbox 与按钮）进入 SSR 结构。
  */
-export const CACHE_VERSION = "v5";
+export const CACHE_VERSION = "v6";
 const KV_PREFIX = `html:${CACHE_VERSION}:`;
 const KV_TTL_SECONDS = 7 * 24 * 3600;
 const CACHE_API_TTL_SECONDS = 60;

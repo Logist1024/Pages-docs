@@ -9,6 +9,7 @@
  *   6. 深色 / 浅色模式切换（写 pd-theme Cookie，SSR 下次直接带主题渲染）
  *   7. 页眉公告栏关闭（localStorage 记忆，按内容去重）
  *   8. 站外导航项站点图标加载失败时自动隐藏
+ *   9. 移动端折叠面板增强：目录抽屉 / 站点菜单互斥、Esc 关闭、背景滚动锁
  */
 import "./read.css";
 import hljs from "highlight.js/lib/common";
@@ -275,6 +276,46 @@ function hideBrokenNavIcons(): void {
   });
 }
 
+/**
+ * 移动端折叠面板（checkbox-hack，无 JS 已可开合）：
+ * - 打开其中一个时自动关闭另一个（目录抽屉 / 站点菜单不叠加）；
+ * - 目录抽屉打开期间锁定背景滚动；
+ * - Esc 一键关闭全部。
+ */
+function setupMobilePanels(): void {
+  const boxes = (["pd-sb-toggle", "pd-nav-toggle"] as const)
+    .map((id) => document.getElementById(id))
+    .filter((el): el is HTMLInputElement => el instanceof HTMLInputElement);
+  if (boxes.length === 0) return;
+  const sbBox = boxes.find((b) => b.id === "pd-sb-toggle") ?? null;
+
+  const syncScrollLock = (): void => {
+    document.body.classList.toggle("drawer-open", Boolean(sbBox?.checked));
+  };
+  for (const box of boxes) {
+    box.addEventListener("change", () => {
+      // 设置 .checked 不触发 change，不会级联；打开一个就收起另一个
+      if (box.checked) {
+        for (const other of boxes) {
+          if (other !== box) other.checked = false;
+        }
+      }
+      syncScrollLock();
+    });
+  }
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Escape") return;
+    let closed = false;
+    for (const box of boxes) {
+      if (box.checked) {
+        box.checked = false;
+        closed = true;
+      }
+    }
+    if (closed) syncScrollLock();
+  });
+}
+
 function boot(): void {
   localizeTimes();
   highlightCode();
@@ -284,6 +325,7 @@ function boot(): void {
   setupCopySource();
   dismissRememberedNotice();
   hideBrokenNavIcons();
+  setupMobilePanels();
   void renderMermaidBlocks();
 }
 

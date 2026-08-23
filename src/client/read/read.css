@@ -269,6 +269,30 @@ body {
   box-shadow: 0 0 0 3px rgba(9, 105, 218, 0.15);
 }
 
+/* ---------- 折叠控件（仅移动端显示）----------
+   checkbox-hack 纯 CSS 开合（无 JS 也可用）；JS 仅增强 Esc 关闭 / 打开时锁定背景滚动。
+   DOM 约束：checkbox 必须位于其控制的目标之前，兄弟选择器 ~ 才能命中。 */
+.nav-toggle-box, .sb-toggle-box { display: none; }
+.sb-backdrop { display: none; }
+.header-collapse { display: contents; }
+body.drawer-open { overflow: hidden; }
+.header-icon-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-soft);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.header-icon-btn:hover, .header-icon-btn:active { color: var(--accent); border-color: var(--accent); }
+.header-icon-btn .icon { display: inline-flex; line-height: 0; }
+
 /* ---------- 布局：全宽页眉置顶；下方左目录栏 + 右内容区（公告与正文在目录右侧） ---------- */
 .page-layout {
   display: grid;
@@ -284,7 +308,7 @@ body {
   grid-template-columns: minmax(0, 1fr) var(--toc-w);
   gap: 2.25rem;
   align-items: start;
-  padding: 1.25rem 1.5rem 4rem;
+  padding: 1.25rem 2rem 4rem;
 }
 
 /* ---------- 侧栏 ---------- */
@@ -295,7 +319,8 @@ body {
   max-height: calc(100vh - 5.5rem);
   overflow-y: auto;
   font-size: 0.92rem;
-  padding-right: 1rem;
+  padding-left: 1.25rem;
+  padding-right: 1.25rem;
 }
 .tree-root, .tree-sub, .sidebar ul {
   list-style: none;
@@ -323,10 +348,10 @@ body {
 }
 .tree-link:hover { background: var(--bg-soft); color: var(--text); }
 .tree-link.active {
-  background: var(--green-soft);
-  color: var(--green);
+  background: var(--bg-soft);
+  color: var(--text);
   font-weight: 600;
-  box-shadow: inset 2px 0 0 var(--green);
+  box-shadow: inset 2px 0 0 var(--text-muted);
 }
 .badge-draft {
   display: inline-block;
@@ -537,7 +562,8 @@ pre.mermaid-error { border-color: var(--border-strong); background: var(--bg-sof
   font-size: 0.85rem;
   max-height: calc(100vh - 5.5rem);
   overflow-y: auto;
-  padding-left: 1rem;
+  padding-left: 1.25rem;
+  padding-right: 1rem;
 }
 .toc-title {
   font-weight: 600;
@@ -559,7 +585,7 @@ pre.mermaid-error { border-color: var(--border-strong); background: var(--bg-sof
   transition: color 0.15s;
 }
 .toc a:hover { color: var(--text); }
-.toc a.active { color: var(--green); border-left-color: var(--green); font-weight: 500; }
+.toc a.active { color: var(--text); border-left-color: var(--text-muted); font-weight: 500; }
 .toc-lv3 { padding-left: 0.8rem; }
 .toc-lv4 { padding-left: 1.6rem; }
 
@@ -747,26 +773,92 @@ pre.mermaid-error { border-color: var(--border-strong); background: var(--bg-sof
 
 @media (max-width: 800px) {
   .page-layout { grid-template-columns: minmax(0, 1fr); }
-  /* 单列时拆开包装层，按 工具栏 → 公告 → 目录 → 正文 排列（display:contents 让子元素直接参与外层网格） */
+  /* 单列时拆开包装层，按 工具栏 → 公告 → 正文 排列（目录栏变为抽屉，不再占文档流） */
   .main-column, .main-column-body { display: contents; }
   .site-header { order: 1; }
   .notice-bar { order: 2; }
-  .sidebar {
-    order: 3;
-    position: static;
-    max-height: none;
-    overflow: visible;
-    border-bottom: 1px solid var(--border);
-    padding-bottom: 1rem;
-    padding-right: 0;
-  }
   .article { order: 4; padding: 1.25rem 1rem 0; }
-  .header-inner { padding: 0.625rem 1rem; flex-wrap: wrap; row-gap: 0.45rem; gap: 0.75rem; }
-  .header-nav { justify-content: flex-start; margin-left: 0; order: 3; width: 100%; }
-  .header-nav-link.active::after { bottom: -0.18rem; }
   .article-title { font-size: 1.6rem; }
-  .search-form { display: none; }
+
+  /* 页眉：左侧 目录按钮 + 站名；右侧 菜单按钮 + 主题切换 */
+  .header-inner { position: relative; padding: 0.5rem 0.75rem; gap: 0.5rem; flex-wrap: nowrap; row-gap: 0; }
+  .header-icon-btn { display: inline-flex; }
+  .site-name { font-size: 0.98rem; margin-right: auto; }
+
+  /* 导航折叠面板（含搜索框）：点右上 ☰ 展开 / 收起 / 切换 */
+  .header-collapse {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    display: none;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 0.7rem 1rem 1rem;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    box-shadow: 0 14px 28px rgba(0, 0, 0, 0.16);
+    z-index: 70;
+    max-height: calc(100vh - 4rem);
+    overflow-y: auto;
+  }
+  .nav-toggle-box:checked ~ .header-collapse { display: flex; }
+  /* 搜索框收进面板：移动端不再常驻页眉 */
+  .header-collapse .search-form { display: block; width: 100%; flex: none; }
+  .header-collapse .header-nav {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+    margin-left: 0;
+  }
+  .header-collapse .header-nav-link { padding: 0.55rem 0.75rem; white-space: normal; }
+  .header-collapse .header-nav-link.active::after { display: none; }
+  .header-collapse .nav-login {
+    margin-left: 0;
+    margin-top: 0.35rem;
+    text-align: center;
+    justify-content: center;
+  }
   .notice-bar { padding: 0.45rem 1rem; }
+
+  /* 文档目录栏：抽屉式滑出，点遮罩关闭 */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(82vw, 320px);
+    max-height: none;
+    z-index: 90;
+    margin: 0;
+    padding: 0.9rem 1rem calc(1.5rem + env(safe-area-inset-bottom));
+    background: var(--bg);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    transform: translateX(-105%);
+    transition: transform 0.22s ease;
+  }
+  .sb-toggle-box:checked ~ .sidebar {
+    transform: none;
+    box-shadow: 0 0 44px rgba(0, 0, 0, 0.3);
+  }
+  .sb-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 85;
+    background: rgba(8, 10, 14, 0.5);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s ease, visibility 0.2s ease;
+  }
+  .sb-toggle-box:checked ~ .sb-backdrop {
+    opacity: 1;
+    visibility: visible;
+  }
+
   .nf-card { padding: 2.4rem 1.4rem 2rem; }
   .nf-code { font-size: 3.8rem; }
 }

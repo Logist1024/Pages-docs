@@ -45,6 +45,16 @@ export function iconExternalArrow(size = 11, cls = "icon"): string {
   return svg('<path d="M7 17 17 7"/><path d="M9 7h8v8"/>', cls, size);
 }
 
+/** 移动端站点菜单按钮（汉堡：三横线等长） */
+export function iconMenu(size = 18, cls = "icon"): string {
+  return svg('<path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/>', cls, size);
+}
+
+/** 移动端目录抽屉按钮（列表：两侧短中间长，与汉堡区分） */
+export function iconTocList(size = 18, cls = "icon"): string {
+  return svg('<path d="M4 6h9"/><path d="M4 12h16"/><path d="M4 18h9"/>', cls, size);
+}
+
 /** 状态图标（/setup 自检页）：通过 / 警告 / 失败 —— 方角对勾 / 实心三角 / 叉 */
 export function statusIcon(state: "ok" | "warn" | "fail", size = 16): string {
   if (state === "ok") {

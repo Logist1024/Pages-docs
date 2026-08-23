@@ -3,6 +3,7 @@ import type { AppEnv, SessionUser } from "../env";
 import { getSessionUser } from "../auth";
 import { fail } from "../http-error";
 import { isValidDocPath } from "../markdown";
+import { isReservedCreatePath } from "../../shared/reserved-paths";
 import { invalidateAllPublishedCaches, nextSiblingSortOrder } from "./documents";
 import type { TreeOrderInput, UpdateFolderInput } from "../../shared/types";
 
@@ -69,6 +70,9 @@ export function registerFolderRoutes(app: Hono<AppEnv>): void {
     const path = typeof body.path === "string" ? body.path.trim().toLowerCase() : "";
     if (!isValidDocPath(path)) {
       return fail(c, "FOLDER_INVALID_PATH");
+    }
+    if (isReservedCreatePath(path)) {
+      return fail(c, "REQ_RESERVED_PATH", `「/${path}」为系统保留路径（docs、admin、api 等），不能使用`);
     }
     const rawName = typeof body.name === "string" ? body.name.trim() : "";
     if (rawName.length > 100) return fail(c, "FOLDER_NAME_INVALID", "目录名称不能超过 100 字");
@@ -160,7 +164,13 @@ export function registerFolderRoutes(app: Hono<AppEnv>): void {
       if (!isValidDocPath(normalized)) {
         return fail(c, "FOLDER_INVALID_PATH", "目标路径只允许小写字母/数字/-/_，用 / 分层");
       }
-      if (normalized !== oldPath) newPath = normalized;
+      if (normalized !== oldPath) {
+        // 移动目标同样不允许占用系统保留路径（新建时已拦截，此处覆盖移动场景）
+        if (isReservedCreatePath(normalized)) {
+          return fail(c, "REQ_RESERVED_PATH", `「/${normalized}」为系统保留路径（docs、admin、api 等），不能使用`);
+        }
+        newPath = normalized;
+      }
     }
 
     if (newPath !== null && newPath.startsWith(`${oldPath}/`)) {

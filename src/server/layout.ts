@@ -2,7 +2,7 @@ import type { TocEntry } from "./markdown";
 import type { TreeNode } from "./tree";
 import type { SessionUser } from "./env";
 import type { NavLink, NoticeBar, SearchHit } from "../shared/types";
-import { iconExternalArrow, iconMoon, iconPencil, iconSun, logoMark } from "./icons";
+import { iconExternalArrow, iconMenu, iconMoon, iconPencil, iconSun, iconTocList, logoMark } from "./icons";
 import { isExternalHref, sanitizeTrustedHtml } from "./settings";
 
 export function esc(s: string): string {
@@ -182,11 +182,24 @@ export function siteHeaderHtml(o: SiteHeaderOptions): string {
       <span class="theme-icon theme-icon-sun">${iconSun(16)}</span>
       <span class="theme-icon theme-icon-moon">${iconMoon(16)}</span>
     </button>`;
+  // 移动端折叠控件（checkbox-hack：纯 CSS 开合，JS 只做 Esc 关闭 / 滚动锁等增强）。
+  // DOM 顺序约束：checkbox 必须位于其控制的目标之前，兄弟选择器 ~ 才能命中。
+  const collapseContent = `${search}${nav}`;
+  const navToggle =
+    collapseContent.trim().length > 0
+      ? `<input type="checkbox" id="pd-nav-toggle" class="nav-toggle-box" tabindex="-1">
+    <label for="pd-nav-toggle" class="header-icon-btn nav-menu-btn" title="站点菜单" aria-label="打开或关闭站点菜单">${iconMenu(
+        18
+      )}</label>`
+      : "";
   return `<header class="site-header">
   <div class="header-inner">
+    <label for="pd-sb-toggle" class="header-icon-btn sb-menu-btn" title="文档目录" aria-label="打开或关闭文档目录">${iconTocList(
+      18
+    )}</label>
     <a class="site-name" href="${esc(o.homeUrl || "/")}">${brand}<span>${esc(o.siteName)}</span></a>
-    ${search}
-    ${nav}
+    ${navToggle}
+    <div class="header-collapse">${collapseContent}</div>
     ${themeToggle}
   </div>
 </header>`;
@@ -234,7 +247,11 @@ function sidebarHtml(tree: TreeNode[], activePath: string | null): string {  con
         )}</ul></details></li>`;
       })
       .join("");
-  return `<nav class="sidebar" aria-label="文档目录"><ul class="tree-root">${
+  // 移动端抽屉控件：checkbox 由页眉「目录」按钮（label for）触发开合，
+  // backdrop label 点击即取消勾选实现关闭；桌面端两者 display:none 不参与网格布局。
+  return `<input type="checkbox" id="pd-sb-toggle" class="sb-toggle-box" tabindex="-1">
+<label for="pd-sb-toggle" class="sb-backdrop" aria-hidden="true"></label>
+<nav class="sidebar" aria-label="文档目录"><ul class="tree-root">${
     tree.length === 0 ? '<li class="tree-empty">暂无文档</li>' : renderNodes(tree)
   }</ul></nav>`;
 }

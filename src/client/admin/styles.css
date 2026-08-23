@@ -37,6 +37,7 @@
   --scrollbar-thumb-hover: #afb8c1;
   --diff-added-text: #116329;
   --diff-removed-text: #82071e;
+  --chart-blue: #0969da;
   --topbar-h: 54px;
   --sidebar-w: 312px;
   --radius: 6px;
@@ -81,6 +82,7 @@
   --scrollbar-thumb-hover: #484f58;
   --diff-added-text: #aff5b4;
   --diff-removed-text: #ffdcd7;
+  --chart-blue: #58a6ff;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -116,6 +118,7 @@
     --scrollbar-thumb-hover: #484f58;
     --diff-added-text: #aff5b4;
     --diff-removed-text: #ffdcd7;
+    --chart-blue: #58a6ff;
   }
 }
 
@@ -1317,7 +1320,7 @@ body.col-resizing { cursor: col-resize !important; user-select: none; }
   overflow: hidden;
 }
 .meter-fill { height: 100%; border-radius: 4px; transition: width 0.25s ease; }
-.meter-fill.tone-primary { background: var(--primary); }
+.meter-fill.tone-primary { background: var(--chart-blue); }
 .meter-fill.tone-warning { background: var(--warning); }
 .meter-fill.tone-danger { background: var(--danger); }
 
@@ -1346,7 +1349,7 @@ body.col-resizing { cursor: col-resize !important; user-select: none; }
 .bar-chart-col { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 3px; }
 .bar-chart-count { font-size: 10px; line-height: 12px; height: 12px; color: var(--text-faint); max-width: 100%; white-space: nowrap; }
 .bar-chart-bar-zone { width: 100%; flex: 1; display: flex; align-items: flex-end; }
-.bar-chart-bar { width: 100%; background: var(--primary); opacity: 0.7; border-radius: 2px 2px 0 0; transition: opacity 0.12s; }
+.bar-chart-bar { width: 100%; background: var(--chart-blue); opacity: 0.7; border-radius: 2px 2px 0 0; transition: opacity 0.12s; }
 .bar-chart-col:hover .bar-chart-bar { opacity: 1; }
 
 .usage-table { font-size: 12.5px; }
