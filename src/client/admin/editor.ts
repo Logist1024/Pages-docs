@@ -327,6 +327,8 @@ function ensureVditor(): Promise<void> {
           // 预览内容配色由 styles.css 映射的 CSS 变量跟随控制台主题，
           // 不引入 content-theme CDN 样式（CSP 禁止外部样式表）。
           hljs: { style: "github-dark" },
+          // 仅保留预览宽度切换；移除「复制到公众号 / 复制到知乎」按钮
+          actions: ["desktop", "tablet", "mobile"],
         },
         toolbar: [
           "edit-mode",

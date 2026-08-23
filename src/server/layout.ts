@@ -120,8 +120,6 @@ export interface SiteHeaderOptions {
   user: SessionUser | null;
   /** 自定义 LOGO 图（data URI 或站内路径）；缺省用内置 LOGO */
   logo?: string | null;
-  /** 页眉公告栏；null 不显示 */
-  notice?: NoticeBar | null;
 }
 
 /** 导航高亮：站内链接与当前路径完全相等，或当前路径位于该前缀之下 */
@@ -134,9 +132,9 @@ function navItemClass(href: string, activePath: string | null): string {
 }
 
 /**
- * 站点头部：品牌（链接到可配置首页地址）+ 搜索框（左侧）+ 一排导航栏（右侧，加粗，
- * 后台可配置：站内 / 路径、站外完整 URL）+ 深浅色切换。
- * 匿名访客在导航尾部保留低调「登录」入口；头部下方可渲染后台配置的公告栏。
+ * 站点顶部工具栏（全宽、最高层级）：品牌（链接到可配置首页地址）+ 搜索框（左侧）+
+ * 一排导航栏（右侧，加粗，后台可配置）+ 深浅色切换。
+ * 匿名访客在导航尾部保留低调「登录」入口。公告栏独立由 noticeBarHtml 渲染在内容区上方。
  */
 export function siteHeaderHtml(o: SiteHeaderOptions): string {
   const links = o.nav
@@ -162,18 +160,6 @@ export function siteHeaderHtml(o: SiteHeaderOptions): string {
       <span class="theme-icon theme-icon-sun">${iconSun(16)}</span>
       <span class="theme-icon theme-icon-moon">${iconMoon(16)}</span>
     </button>`;
-  const noticeHtml = o.notice
-    ? `<div class="notice-bar" data-notice-bar>
-      <div class="notice-text">${sanitizeTrustedHtml(o.notice.text)}</div>${
-        o.notice.link
-          ? `<a class="notice-link" href="${esc(o.notice.link)}"${
-              isExternalHref(o.notice.link) ? ' target="_blank" rel="noopener noreferrer"' : ""
-            }>查看详情</a>`
-          : ""
-      }
-      <button class="notice-close" type="button" data-notice-close aria-label="关闭公告">&times;</button>
-    </div>`
-    : "";
   return `<header class="site-header">
   <div class="header-inner">
     <a class="site-name" href="${esc(o.homeUrl || "/")}">${brand}<span>${esc(o.siteName)}</span></a>
@@ -181,8 +167,22 @@ export function siteHeaderHtml(o: SiteHeaderOptions): string {
     ${nav}
     ${themeToggle}
   </div>
-  ${noticeHtml}
 </header>`;
+}
+
+/** 页眉公告栏（渲染在目录栏右侧、文档展示页上方）；null 不显示 */
+export function noticeBarHtml(notice: NoticeBar | null | undefined): string {
+  if (!notice) return "";
+  return `<div class="notice-bar" data-notice-bar>
+      <div class="notice-text">${sanitizeTrustedHtml(notice.text)}</div>${
+        notice.link
+          ? `<a class="notice-link" href="${esc(notice.link)}"${
+              isExternalHref(notice.link) ? ' target="_blank" rel="noopener noreferrer"' : ""
+            }>查看详情</a>`
+          : ""
+      }
+      <button class="notice-close" type="button" data-notice-close aria-label="关闭公告">&times;</button>
+    </div>`;
 }
 
 function sidebarHtml(tree: TreeNode[], activePath: string | null): string {  const renderNodes = (nodes: TreeNode[]): string =>
@@ -261,19 +261,19 @@ export function renderDocPage(o: DocPageOptions): string {
         )}">去编辑</a></div>`
       : "";
   const content = `
+${siteHeaderHtml({
+  siteName: o.siteName,
+  homeUrl: o.homeUrl ?? "/",
+  nav: o.nav ?? [],
+  activePath: `/${o.path}`,
+  showSearch: true,
+  user: o.user,
+  logo: o.logo,
+})}
 <div class="page-layout">
   ${sidebarHtml(o.tree, o.path)}
   <div class="main-column">
-    ${siteHeaderHtml({
-      siteName: o.siteName,
-      homeUrl: o.homeUrl ?? "/",
-      nav: o.nav ?? [],
-      activePath: `/${o.path}`,
-      showSearch: true,
-      user: o.user,
-      logo: o.logo,
-      notice: o.notice,
-    })}
+    ${noticeBarHtml(o.notice)}
     <div class="main-column-body">
       <main class="article">
         ${draftBanner}
@@ -328,19 +328,19 @@ export function renderSearchPage(o: SearchPageOptions): string {
     )
     .join("");
   const content = `
+${siteHeaderHtml({
+  siteName: o.siteName,
+  homeUrl: o.homeUrl ?? "/",
+  nav: o.nav ?? [],
+  activePath: "/search",
+  showSearch: true,
+  user: o.user ?? null,
+  logo: o.logo,
+})}
 <div class="page-layout">
   ${sidebarHtml(o.tree, null)}
   <div class="main-column">
-    ${siteHeaderHtml({
-      siteName: o.siteName,
-      homeUrl: o.homeUrl ?? "/",
-      nav: o.nav ?? [],
-      activePath: "/search",
-      showSearch: true,
-      user: o.user ?? null,
-      logo: o.logo,
-      notice: o.notice,
-    })}
+    ${noticeBarHtml(o.notice)}
     <div class="main-column-body">
       <main class="article">
         <h1 class="article-title">搜索：${esc(o.query)}</h1>
