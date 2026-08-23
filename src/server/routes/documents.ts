@@ -185,12 +185,14 @@ export function registerDocumentRoutes(app: Hono<AppEnv>): void {
 
     const now = Date.now();
     try {
+      // RETURNING 取新 id：不依赖 meta.last_row_id（D1 生产环境可能返回 null）
       const result = await c.env.DB.prepare(
-        "INSERT INTO documents (path, title, status, content_md, revision_seq, updated_by, created_at, updated_at) VALUES (?, ?, 'draft', ?, 0, ?, ?, ?)"
+        "INSERT INTO documents (path, title, status, content_md, revision_seq, updated_by, created_at, updated_at) VALUES (?, ?, 'draft', ?, 0, ?, ?, ?) RETURNING id"
       )
         .bind(path, title, content, user.name, now, now)
-        .run();
-      const id = result.meta.last_row_id;
+        .all<{ id: number }>();
+      const id = result.results[0]?.id;
+      if (id === undefined) throw new Error("INSERT 未返回 id");
       return c.json(await getDetailById(c.env.DB, id), 201);
     } catch (error) {
       if (String(error).includes("UNIQUE")) return c.json({ error: "该 path 已存在" }, 409);
@@ -252,33 +254,54 @@ export function registerDocumentRoutes(app: Hono<AppEnv>): void {
     if (updates.length === 0) return c.json({ error: "没有需要更新的字段" }, 400);
 
     // 条件更新：WHERE 带上 base_revision_seq，把「检查 + 写入」合成一步原子操作，
-    // 两个并发请求只有一个能成功，杜绝互相覆盖导致的静默丢稿
+    // 两个并发请求只有一个能成功，杜绝互相覆盖导致的静默丢稿。
+    // 用 RETURNING 的结果集判断命中，不依赖 meta.changes —— D1 生产环境对该
+    // 统计不可靠（可能返回 0/null），曾导致保存成功却误报冲突。
     updates.push("revision_seq = revision_seq + 1", "updated_by = ?", "updated_at = ?");
     binds.push(user.name, Date.now(), baseSeq, id);
-    let updated: { meta: { changes?: number } };
-    try {
-      updated = await c.env.DB.prepare(`UPDATE documents SET ${updates.join(", ")} WHERE id = ? AND revision_seq = ?`)
+    const updateSql = `UPDATE documents SET ${updates.join(", ")} WHERE id = ? AND revision_seq = ? RETURNING revision_seq`;
+    const runUpdate = (): Promise<D1Result<{ revision_seq: number }>> =>
+      c.env.DB.prepare(updateSql)
         .bind(...binds)
-        .run();
+        .all<{ revision_seq: number }>();
+    let result: D1Result<{ revision_seq: number }>;
+    try {
+      result = await runUpdate();
     } catch (error) {
       if (String(error).includes("UNIQUE")) return c.json({ error: "该 path 已存在" }, 409);
       throw error;
     }
 
-    if ((updated.meta.changes ?? 0) === 0) {
-      // 版本号已被并发请求推进：重读最新行并返回冲突
+    if (result.results.length === 0) {
+      // 未命中：区分「真冲突（版本号已被并发请求推进）」与「统计假阴性」
       const freshRow = await c.env.DB.prepare("SELECT * FROM documents WHERE id = ?").bind(id).first<DocRow>();
       if (!freshRow) return c.json({ error: "文档不存在" }, 404);
-      return c.json(conflictPayload(baseSeq, freshRow), 409);
+      if (freshRow.revision_seq !== baseSeq) {
+        return c.json(conflictPayload(baseSeq, freshRow), 409);
+      }
+      // 版本号其实未被推进：假阴性，重试一次自愈
+      try {
+        result = await runUpdate();
+      } catch (error) {
+        if (String(error).includes("UNIQUE")) return c.json({ error: "该 path 已存在" }, 409);
+        throw error;
+      }
+      if (result.results.length === 0) {
+        console.error(
+          `[pages-docs] 条件更新两次未命中但版本号未变：id=${id} base=${baseSeq} server=${freshRow.revision_seq}`
+        );
+        return c.json({ error: "保存未能生效，请重试" }, 503);
+      }
     }
 
-    const fresh = await c.env.DB.prepare("SELECT * FROM documents WHERE id = ?").bind(id).first<DocRow>();
-    const moved = fresh!.path !== row.path;
+    const newSeq = result.results[0]!.revision_seq;
+    // 是否改动了访问路径（updates 里存在 "path = ?" 即代表路径发生了变化）
+    const moved = updates.some((u) => u.startsWith("path"));
     if (moved || row.status === "published") {
       // 移动路径或已发布文档的元数据变化 → 失效缓存（内容快照未变时阅读页不受影响）
       await invalidateAllPageCaches(c.env, [row.path]);
     }
-    return c.json({ ok: true as const, revision_seq: fresh!.revision_seq, saved_at: Date.now() });
+    return c.json({ ok: true as const, revision_seq: newSeq, saved_at: Date.now() });
   });
 
   // POST /api/docs/:id/publish —— 发布（PLAN 4.3：事务内插 revision + 更新 documents + 失效缓存）

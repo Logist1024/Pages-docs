@@ -199,11 +199,12 @@ export function registerFolderRoutes(app: Hono<AppEnv>): void {
           .bind(newPath, restPos, oldLen, oldSlash),
       ]);
 
-      // 目录自身行：更新为新路径；隐式目录（无行）在同时命名时插入显式行承载名称
-      const updatedSelf = await c.env.DB.prepare("UPDATE folders SET path = ? WHERE path = ?")
+      // 目录自身行：更新为新路径；隐式目录（无行）在同时命名时插入显式行承载名称。
+      // 用 RETURNING 判断命中，避免依赖 meta.changes（D1 生产环境统计不可靠）。
+      const updatedSelf = await c.env.DB.prepare("UPDATE folders SET path = ? WHERE path = ? RETURNING path")
         .bind(newPath, oldPath)
-        .run();
-      if ((updatedSelf.meta.changes ?? 0) === 0 && newName !== null) {
+        .all<{ path: string }>();
+      if (updatedSelf.results.length === 0 && newName !== null) {
         try {
           await c.env.DB.prepare("INSERT INTO folders (path, name, created_by, created_at) VALUES (?, ?, ?, ?)")
             .bind(newPath, newName, user.name, Date.now())
@@ -218,13 +219,18 @@ export function registerFolderRoutes(app: Hono<AppEnv>): void {
     // ---- 应用名称（在路径处理之后：newPath 行已就位）----
     if (newName !== null) {
       const targetPath = newPath ?? oldPath;
-      const updated = await c.env.DB.prepare("UPDATE folders SET name = ? WHERE path = ?")
+      const updated = await c.env.DB.prepare("UPDATE folders SET name = ? WHERE path = ? RETURNING path")
         .bind(newName, targetPath)
-        .run();
-      if ((updated.meta.changes ?? 0) === 0) {
-        await c.env.DB.prepare("INSERT INTO folders (path, name, created_by, created_at) VALUES (?, ?, ?, ?)")
-          .bind(targetPath, newName, user.name, Date.now())
-          .run();
+        .all<{ path: string }>();
+      if (updated.results.length === 0) {
+        try {
+          await c.env.DB.prepare("INSERT INTO folders (path, name, created_by, created_at) VALUES (?, ?, ?, ?)")
+            .bind(targetPath, newName, user.name, Date.now())
+            .run();
+        } catch {
+          // 行已存在（或并发创建）：退化为仅更新名称
+          await c.env.DB.prepare("UPDATE folders SET name = ? WHERE path = ?").bind(newName, targetPath).run();
+        }
       }
     }
 
