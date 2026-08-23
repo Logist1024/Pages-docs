@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv, Env } from "./env";
 import { ensureMigrated } from "./db/migrate";
+import { fail } from "./http-error";
 import { registerSetupRoute } from "./routes/setup";
 import { registerAuthRoutes } from "./routes/auth.routes";
 import { registerDocumentRoutes } from "./routes/documents";
@@ -61,9 +62,9 @@ app.use("/api/*", async (c, next) => {
   if (!origin) return next(); // 非浏览器客户端（curl 等）依赖 SameSite 即可
   try {
     const host = c.req.header("Host") ?? new URL(c.req.url).host;
-    if (new URL(origin).host !== host) return c.json({ error: "跨站请求被拒绝" }, 403);
+    if (new URL(origin).host !== host) return fail(c, "CSRF_BLOCKED");
   } catch {
-    return c.json({ error: "Origin 不合法" }, 403);
+    return fail(c, "ORIGIN_INVALID");
   }
   await next();
 });
@@ -101,18 +102,18 @@ async function serveAdminAsset(c: { env: Env; req: { raw: Request } }): Promise<
   return c.env.ASSETS.fetch(request);
 }
 
-// ---- API 404 与全局错误处理 ----
+// ---- API 404 与全局错误处理（错误码契约见 ERRORS.md）----
 app.notFound((c) => {
   if (c.req.path.startsWith("/api/")) {
-    return c.json({ error: "接口不存在" }, 404);
+    return fail(c, "SYS_NOT_FOUND");
   }
   return c.text("Not Found", 404);
 });
 
 app.onError((error, c) => {
-  console.error(`[pages-docs] ${c.req.method} ${c.req.path}:`, error);
+  console.error(`[pages-docs] [SYS_INTERNAL] ${c.req.method} ${c.req.path}:`, error);
   if (c.req.path.startsWith("/api/")) {
-    return c.json({ error: "服务器内部错误" }, 500);
+    return fail(c, "SYS_INTERNAL");
   }
   return c.text("Internal Server Error", 500);
 });

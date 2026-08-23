@@ -26,19 +26,25 @@ import type {
 
 export class ApiError extends Error {
   readonly status: number;
+  /** 稳定错误码（服务端契约见 ERRORS.md）；网络层/兜底场景由本模块合成 */
+  readonly code: string | null;
   readonly body: unknown;
 
-  constructor(status: number, message: string, body: unknown) {
+  constructor(status: number, message: string, body: unknown, code: string | null = null) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.code = code;
     this.body = body;
   }
 }
 
-/** 从任意异常中提取可展示的文案（永不静默失败） */
+/** 从任意异常中提取可展示的文案（永不静默失败）。附带稳定错误码便于对照 ERRORS.md 排查 */
 export function errMessage(e: unknown): string {
-  if (e instanceof ApiError) return e.message || `请求失败（HTTP ${e.status}）`;
+  if (e instanceof ApiError) {
+    const base = e.message || `请求失败（HTTP ${e.status}）`;
+    return e.code ? `${base} [${e.code}]` : base;
+  }
   if (e instanceof Error) return e.message;
   return String(e);
 }
@@ -69,12 +75,21 @@ function extractErrorMessage(body: unknown): string | null {
   return null;
 }
 
+/** 服务端标准错误响应携带的稳定错误码（ERRORS.md 契约） */
+function extractErrorCode(body: unknown): string | null {
+  if (body !== null && typeof body === "object" && "code" in body) {
+    const v = (body as { code: unknown }).code;
+    if (typeof v === "string" && v.length > 0) return v;
+  }
+  return null;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
     res = await fetch(path, init);
   } catch {
-    throw new ApiError(0, "网络错误，请检查连接后重试", null);
+    throw new ApiError(0, "网络错误，请检查连接后重试", null, "NET_FAILED");
   }
 
   let body: unknown = null;
@@ -88,7 +103,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!res.ok) {
-    throw new ApiError(res.status, extractErrorMessage(body) ?? `请求失败（HTTP ${res.status}）`, body);
+    // 非 JSON 响应体（如 Cloudflare 网关错误页）单独标记，便于区分「服务端报错」与「没到服务端」
+    if (text.length > 0 && body === null) {
+      throw new ApiError(res.status, `服务端返回了无法解析的响应（HTTP ${res.status}）`, null, "NET_BAD_RESPONSE");
+    }
+    throw new ApiError(
+      res.status,
+      extractErrorMessage(body) ?? `请求失败（HTTP ${res.status}）`,
+      body,
+      extractErrorCode(body) ?? "NET_HTTP"
+    );
   }
   return body as T;
 }

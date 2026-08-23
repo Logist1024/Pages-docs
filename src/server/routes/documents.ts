@@ -3,6 +3,7 @@ import type { AppEnv, SessionUser } from "../env";
 import { getSessionUser } from "../auth";
 import { invalidatePublishedPages } from "../cache";
 import { isValidDocPath } from "../markdown";
+import { fail } from "../http-error";
 import type {
   ConflictPayload,
   DocumentDetail,
@@ -142,13 +143,13 @@ export function registerDocumentRoutes(app: Hono<AppEnv>): void {
 
   api.use("/docs/*", async (c, next) => {
     const user = await requireUser(c);
-    if (!user) return c.json({ error: "请先登录" }, 401);
+    if (!user) return fail(c, "AUTH_REQUIRED");
     c.set("user", user);
     await next();
   });
   api.use("/revisions/*", async (c, next) => {
     const user = await requireUser(c);
-    if (!user) return c.json({ error: "请先登录" }, 401);
+    if (!user) return fail(c, "AUTH_REQUIRED");
     c.set("user", user);
     await next();
   });
@@ -170,17 +171,17 @@ export function registerDocumentRoutes(app: Hono<AppEnv>): void {
     try {
       body = await c.req.json();
     } catch {
-      return c.json({ error: "请求体必须是 JSON" }, 400);
+      return fail(c, "REQ_BAD_JSON");
     }
     const path = typeof body.path === "string" ? body.path.trim().toLowerCase() : "";
     const title = typeof body.title === "string" ? body.title.trim() : "";
     const content = typeof body.content_md === "string" ? body.content_md : "";
     if (!isValidDocPath(path)) {
-      return c.json({ error: "path 只允许小写字母/数字/-/_，用 / 分层，如 guide/intro" }, 400);
+      return fail(c, "DOC_INVALID_PATH", "path 只允许小写字母/数字/-/_，用 / 分层，如 guide/intro");
     }
-    if (!title || title.length > MAX_TITLE_LEN) return c.json({ error: "标题必填且不超过 200 字" }, 400);
+    if (!title || title.length > MAX_TITLE_LEN) return fail(c, "DOC_INVALID_TITLE");
     if (new TextEncoder().encode(content).byteLength > MAX_CONTENT_BYTES) {
-      return c.json({ error: "内容超过 512KB 上限" }, 400);
+      return fail(c, "DOC_CONTENT_TOO_LARGE");
     }
 
     const now = Date.now();
@@ -195,7 +196,7 @@ export function registerDocumentRoutes(app: Hono<AppEnv>): void {
       if (id === undefined) throw new Error("INSERT 未返回 id");
       return c.json(await getDetailById(c.env.DB, id), 201);
     } catch (error) {
-      if (String(error).includes("UNIQUE")) return c.json({ error: "该 path 已存在" }, 409);
+      if (String(error).includes("UNIQUE")) return fail(c, "DOC_PATH_TAKEN");
       throw error;
     }
   });
@@ -203,9 +204,9 @@ export function registerDocumentRoutes(app: Hono<AppEnv>): void {
   // GET /api/docs/:id
   api.get("/docs/:id", async (c) => {
     const id = toId(c.req.param("id"));
-    if (id === null) return c.json({ error: "文档不存在" }, 404);
+    if (id === null) return fail(c, "DOC_NOT_FOUND");
     const detail = await getDetailById(c.env.DB, id);
-    if (!detail) return c.json({ error: "文档不存在" }, 404);
+    if (!detail) return fail(c, "DOC_NOT_FOUND");
     return c.json(detail);
   });
 
@@ -213,45 +214,45 @@ export function registerDocumentRoutes(app: Hono<AppEnv>): void {
   api.put("/docs/:id", async (c) => {
     const user = c.get("user")!
     const id = toId(c.req.param("id"));
-    if (id === null) return c.json({ error: "文档不存在" }, 404);
+    if (id === null) return fail(c, "DOC_NOT_FOUND");
     let body: { base_revision_seq?: unknown; title?: unknown; path?: unknown; content_md?: unknown };
     try {
       body = await c.req.json();
     } catch {
-      return c.json({ error: "请求体必须是 JSON" }, 400);
+      return fail(c, "REQ_BAD_JSON");
     }
     const baseSeq = typeof body.base_revision_seq === "number" ? body.base_revision_seq : null;
-    if (baseSeq === null) return c.json({ error: "缺少 base_revision_seq" }, 400);
+    if (baseSeq === null) return fail(c, "DOC_MISSING_BASE_SEQ");
 
     // 预检仅用于提前返回友好错误；真正的并发防护靠下方带条件的 UPDATE
     const row = await c.env.DB.prepare("SELECT * FROM documents WHERE id = ?").bind(id).first<DocRow>();
-    if (!row) return c.json({ error: "文档不存在" }, 404);
+    if (!row) return fail(c, "DOC_NOT_FOUND");
 
     const updates: string[] = [];
     const binds: (string | number)[] = [];
     if (body.title !== undefined) {
       const title = typeof body.title === "string" ? body.title.trim() : "";
-      if (!title || title.length > MAX_TITLE_LEN) return c.json({ error: "标题必填且不超过 200 字" }, 400);
+      if (!title || title.length > MAX_TITLE_LEN) return fail(c, "DOC_INVALID_TITLE");
       updates.push("title = ?");
       binds.push(title);
     }
     if (body.content_md !== undefined) {
       const content = typeof body.content_md === "string" ? body.content_md : "";
       if (new TextEncoder().encode(content).byteLength > MAX_CONTENT_BYTES) {
-        return c.json({ error: "内容超过 512KB 上限" }, 400);
+        return fail(c, "DOC_CONTENT_TOO_LARGE");
       }
       updates.push("content_md = ?");
       binds.push(content);
     }
     if (body.path !== undefined) {
       const path = typeof body.path === "string" ? body.path.trim().toLowerCase() : "";
-      if (!isValidDocPath(path)) return c.json({ error: "path 格式不合法" }, 400);
+      if (!isValidDocPath(path)) return fail(c, "DOC_INVALID_PATH", "path 格式不合法");
       if (path !== row.path) {
         updates.push("path = ?");
         binds.push(path);
       }
     }
-    if (updates.length === 0) return c.json({ error: "没有需要更新的字段" }, 400);
+    if (updates.length === 0) return fail(c, "DOC_NO_FIELDS");
 
     // 条件更新：WHERE 带上 base_revision_seq，把「检查 + 写入」合成一步原子操作，
     // 两个并发请求只有一个能成功，杜绝互相覆盖导致的静默丢稿。
@@ -268,29 +269,29 @@ export function registerDocumentRoutes(app: Hono<AppEnv>): void {
     try {
       result = await runUpdate();
     } catch (error) {
-      if (String(error).includes("UNIQUE")) return c.json({ error: "该 path 已存在" }, 409);
+      if (String(error).includes("UNIQUE")) return fail(c, "DOC_PATH_TAKEN");
       throw error;
     }
 
     if (result.results.length === 0) {
       // 未命中：区分「真冲突（版本号已被并发请求推进）」与「统计假阴性」
       const freshRow = await c.env.DB.prepare("SELECT * FROM documents WHERE id = ?").bind(id).first<DocRow>();
-      if (!freshRow) return c.json({ error: "文档不存在" }, 404);
+      if (!freshRow) return fail(c, "DOC_NOT_FOUND");
       if (freshRow.revision_seq !== baseSeq) {
-        return c.json(conflictPayload(baseSeq, freshRow), 409);
+        return c.json({ ...conflictPayload(baseSeq, freshRow), code: "DOC_CONFLICT" }, 409);
       }
       // 版本号其实未被推进：假阴性，重试一次自愈
       try {
         result = await runUpdate();
       } catch (error) {
-        if (String(error).includes("UNIQUE")) return c.json({ error: "该 path 已存在" }, 409);
+        if (String(error).includes("UNIQUE")) return fail(c, "DOC_PATH_TAKEN");
         throw error;
       }
       if (result.results.length === 0) {
         console.error(
           `[pages-docs] 条件更新两次未命中但版本号未变：id=${id} base=${baseSeq} server=${freshRow.revision_seq}`
         );
-        return c.json({ error: "保存未能生效，请重试" }, 503);
+        return fail(c, "DOC_SAVE_NOT_APPLIED");
       }
     }
 
@@ -308,7 +309,7 @@ export function registerDocumentRoutes(app: Hono<AppEnv>): void {
   api.post("/docs/:id/publish", async (c) => {
     const user = c.get("user")!
     const id = toId(c.req.param("id"));
-    if (id === null) return c.json({ error: "文档不存在" }, 404);
+    if (id === null) return fail(c, "DOC_NOT_FOUND");
     let note: string | null = null;
     try {
       const body = await c.req.json();
@@ -318,7 +319,7 @@ export function registerDocumentRoutes(app: Hono<AppEnv>): void {
     }
 
     const row = await c.env.DB.prepare("SELECT * FROM documents WHERE id = ?").bind(id).first<DocRow>();
-    if (!row) return c.json({ error: "文档不存在" }, 404);
+    if (!row) return fail(c, "DOC_NOT_FOUND");
 
     const now = Date.now();
     // D1 batch 在同一事务内顺序执行；第二条用子查询取到刚插入的快照 id
@@ -342,9 +343,9 @@ export function registerDocumentRoutes(app: Hono<AppEnv>): void {
   api.post("/docs/:id/unpublish", async (c) => {
     const user = c.get("user")!
     const id = toId(c.req.param("id"));
-    if (id === null) return c.json({ error: "文档不存在" }, 404);
+    if (id === null) return fail(c, "DOC_NOT_FOUND");
     const row = await c.env.DB.prepare("SELECT * FROM documents WHERE id = ?").bind(id).first<DocRow>();
-    if (!row) return c.json({ error: "文档不存在" }, 404);
+    if (!row) return fail(c, "DOC_NOT_FOUND");
     await c.env.DB.prepare("UPDATE documents SET status = 'draft', updated_by = ?, updated_at = ? WHERE id = ?")
       .bind(user.name, Date.now(), id)
       .run();
@@ -356,11 +357,11 @@ export function registerDocumentRoutes(app: Hono<AppEnv>): void {
   // DELETE /api/docs/:id —— 仅 admin（PLAN 4.1 角色说明）
   api.delete("/docs/:id", async (c) => {
     const user = c.get("user")!
-    if (user.role !== "admin") return c.json({ error: "需要 admin 角色" }, 403);
+    if (user.role !== "admin") return fail(c, "AUTH_FORBIDDEN");
     const id = toId(c.req.param("id"));
-    if (id === null) return c.json({ error: "文档不存在" }, 404);
+    if (id === null) return fail(c, "DOC_NOT_FOUND");
     const row = await c.env.DB.prepare("SELECT * FROM documents WHERE id = ?").bind(id).first<DocRow>();
-    if (!row) return c.json({ error: "文档不存在" }, 404);
+    if (!row) return fail(c, "DOC_NOT_FOUND");
     // 显式清理 FTS → 删除版本（子表）→ 删除文档（父表，FK 立即约束）；
     // 最后的 AFTER DELETE 触发器查不到 revisions 行，自然成为空操作
     await c.env.DB.batch([
@@ -387,13 +388,13 @@ export function registerDocumentRoutes(app: Hono<AppEnv>): void {
   // GET /api/revisions/:id
   api.get("/revisions/:id", async (c) => {
     const id = toId(c.req.param("id"));
-    if (id === null) return c.json({ error: "版本不存在" }, 404);
+    if (id === null) return fail(c, "REV_NOT_FOUND");
     const row = await c.env.DB.prepare(
       "SELECT id, document_id, title, content_md, author_name, note, created_at FROM revisions WHERE id = ?"
     )
       .bind(id)
       .first<RevisionDetail>();
-    if (!row) return c.json({ error: "版本不存在" }, 404);
+    if (!row) return fail(c, "REV_NOT_FOUND");
     return c.json(row);
   });
 
@@ -401,9 +402,9 @@ export function registerDocumentRoutes(app: Hono<AppEnv>): void {
   api.post("/revisions/:id/rollback", async (c) => {
     const user = c.get("user")!
     const id = toId(c.req.param("id"));
-    if (id === null) return c.json({ error: "版本不存在" }, 404);
+    if (id === null) return fail(c, "REV_NOT_FOUND");
     const rev = await c.env.DB.prepare("SELECT * FROM revisions WHERE id = ?").bind(id).first<RevisionDetail>();
-    if (!rev) return c.json({ error: "版本不存在" }, 404);
+    if (!rev) return fail(c, "REV_NOT_FOUND");
     const now = Date.now();
     // 与发布流程一致：batch 同一事务内先插快照，再原子更新文档指针
     await c.env.DB.batch([
@@ -426,17 +427,17 @@ export function registerDocumentRoutes(app: Hono<AppEnv>): void {
   // DELETE /api/revisions/:id —— 删除单条版本；当前发布中的快照不可删除
   api.delete("/revisions/:id", async (c) => {
     const user = c.get("user")!;
-    if (user.role !== "admin") return c.json({ error: "需要 admin 角色" }, 403);
+    if (user.role !== "admin") return fail(c, "AUTH_FORBIDDEN");
     const id = toId(c.req.param("id"));
-    if (id === null) return c.json({ error: "版本不存在" }, 404);
+    if (id === null) return fail(c, "REV_NOT_FOUND");
     const rev = await c.env.DB.prepare("SELECT id, document_id FROM revisions WHERE id = ?").bind(id).first<{ id: number; document_id: number }>();
-    if (!rev) return c.json({ error: "版本不存在" }, 404);
+    if (!rev) return fail(c, "REV_NOT_FOUND");
     const doc = await c.env.DB
       .prepare("SELECT current_revision_id FROM documents WHERE id = ?")
       .bind(rev.document_id)
       .first<{ current_revision_id: number | null }>();
     if (doc?.current_revision_id === id) {
-      return c.json({ error: "该版本是当前发布的快照，请先「更新发布」或「取消发布」后再删除" }, 409);
+      return fail(c, "REV_SNAPSHOT_PROTECTED");
     }
     await c.env.DB.prepare("DELETE FROM revisions WHERE id = ?").bind(id).run();
     return c.json({ ok: true as const });
@@ -445,11 +446,11 @@ export function registerDocumentRoutes(app: Hono<AppEnv>): void {
   // DELETE /api/docs/:id/revisions —— 清空该文档全部版本（保留当前发布快照）
   api.delete("/docs/:id/revisions", async (c) => {
     const user = c.get("user")!;
-    if (user.role !== "admin") return c.json({ error: "需要 admin 角色" }, 403);
+    if (user.role !== "admin") return fail(c, "AUTH_FORBIDDEN");
     const id = toId(c.req.param("id"));
-    if (id === null) return c.json({ error: "文档不存在" }, 404);
+    if (id === null) return fail(c, "DOC_NOT_FOUND");
     const row = await c.env.DB.prepare("SELECT id, current_revision_id FROM documents WHERE id = ?").bind(id).first<DocRow>();
-    if (!row) return c.json({ error: "文档不存在" }, 404);
+    if (!row) return fail(c, "DOC_NOT_FOUND");
     const result = await c.env.DB
       .prepare(
         row.current_revision_id !== null

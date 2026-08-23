@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../env";
 import { getSessionUser } from "../auth";
+import { fail } from "../http-error";
 
 // 图片类型白名单（PLAN 4.4）
 const MIME_EXT: Record<string, string> = {
@@ -26,26 +27,26 @@ function randomKey(ext: string, now: Date): string {
 export function registerUploadRoute(app: Hono<AppEnv>): void {
   app.post("/api/upload", async (c) => {
     const user = await getSessionUser(c.env, c.req.raw);
-    if (!user) return c.json({ error: "请先登录" }, 401);
+    if (!user) return fail(c, "AUTH_REQUIRED");
 
     if (!c.env.MEDIA) {
-      return c.json({ error: "R2 未配置：请在控制台绑定 MEDIA 存储桶（见 /setup）" }, 503);
+      return fail(c, "MEDIA_NOT_CONFIGURED");
     }
 
     let form: FormData;
     try {
       form = await c.req.formData();
     } catch {
-      return c.json({ error: "请求必须是 multipart/form-data" }, 400);
+      return fail(c, "UPLOAD_BAD_FORM");
     }
     const file = form.get("file");
-    if (!(file instanceof File)) return c.json({ error: "缺少 file 字段" }, 400);
+    if (!(file instanceof File)) return fail(c, "UPLOAD_NO_FILE");
 
     const mime = file.type.split(";")[0]!.trim().toLowerCase();
     const ext = MIME_EXT[mime];
-    if (!ext) return c.json({ error: `仅支持图片类型：${Object.keys(MIME_EXT).join(", ")}` }, 415);
-    if (file.size > MAX_UPLOAD_BYTES) return c.json({ error: "文件超过 10MB 上限" }, 413);
-    if (file.size === 0) return c.json({ error: "空文件" }, 400);
+    if (!ext) return fail(c, "UPLOAD_UNSUPPORTED_TYPE", `仅支持图片类型：${Object.keys(MIME_EXT).join(", ")}`);
+    if (file.size > MAX_UPLOAD_BYTES) return fail(c, "UPLOAD_TOO_LARGE");
+    if (file.size === 0) return fail(c, "UPLOAD_EMPTY");
 
     const key = randomKey(ext, new Date());
     const arrayBuffer = await file.arrayBuffer();

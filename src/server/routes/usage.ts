@@ -9,6 +9,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../env";
 import { getSessionUser } from "../auth";
+import { fail } from "../http-error";
 import type { DailyCount, D1Usage, KVUsage, R2Usage, TableStat, UsageStats } from "../../shared/types";
 
 /** R2 list 单次最多返回 1000 个对象；这里限制总扫描量以控制耗时（免费额度内足够） */
@@ -147,8 +148,8 @@ async function kvUsage(env: AppEnv["Bindings"]): Promise<KVUsage> {
 export function registerUsageRoutes(app: Hono<AppEnv>): void {
   app.get("/api/admin/usage", async (c) => {
     const user = await getSessionUser(c.env, c.req.raw);
-    if (!user) return c.json({ error: "请先登录" }, 401);
-    if (user.role !== "admin") return c.json({ error: "需要 admin 角色" }, 403);
+    if (!user) return fail(c, "AUTH_REQUIRED");
+    if (user.role !== "admin") return fail(c, "AUTH_FORBIDDEN");
 
     const [d1, r2, kv] = await Promise.all([d1Usage(c.env.DB), r2Usage(c.env), kvUsage(c.env)]);
     const stats: UsageStats = { generated_at: Date.now(), d1, r2, kv };

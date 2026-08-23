@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../env";
 import { getSessionUser } from "../auth";
+import { fail } from "../http-error";
 import { ftsQueryOf } from "../markdown";
 import { esc } from "../layout";
 import type { SearchHit, SessionRow } from "../../shared/types";
@@ -76,8 +77,8 @@ export function registerAdminRoutes(app: Hono<AppEnv>): void {
   const admin = new Hono<AppEnv>();
   admin.use("*", async (c, next) => {
     const user = await getSessionUser(c.env, c.req.raw);
-    if (!user) return c.json({ error: "请先登录" }, 401);
-    if (user.role !== "admin") return c.json({ error: "需要 admin 角色" }, 403);
+    if (!user) return fail(c, "AUTH_REQUIRED");
+    if (user.role !== "admin") return fail(c, "AUTH_FORBIDDEN");
     c.set("user", user);
     await next();
   });
@@ -91,7 +92,7 @@ export function registerAdminRoutes(app: Hono<AppEnv>): void {
 
   admin.delete("/sessions/:tokenHash", async (c) => {
     const tokenHash = c.req.param("tokenHash");
-    if (!/^[0-9a-f]{64}$/.test(tokenHash)) return c.json({ error: "token_hash 不合法" }, 400);
+    if (!/^[0-9a-f]{64}$/.test(tokenHash)) return fail(c, "REQ_BAD_PARAM", "token_hash 不合法");
     await c.env.DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(tokenHash).run();
     return c.json({ ok: true });
   });

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../env";
 import { getSessionUser } from "../auth";
+import { fail } from "../http-error";
 import { invalidatePublishedPages } from "../cache";
 import { listPublishedPaths } from "./documents";
 import {
@@ -35,17 +36,17 @@ export function registerSettingsRoutes(app: Hono<AppEnv>): void {
 
   app.put("/api/settings", async (c) => {
     const user = await getSessionUser(c.env, c.req.raw);
-    if (!user) return c.json({ error: "请先登录" }, 401);
-    if (user.role !== "admin") return c.json({ error: "需要 admin 角色" }, 403);
+    if (!user) return fail(c, "AUTH_REQUIRED");
+    if (user.role !== "admin") return fail(c, "AUTH_FORBIDDEN");
 
     let body: unknown;
     try {
       body = await c.req.json();
     } catch {
-      return c.json({ error: "请求体必须是 JSON" }, 400);
+      return fail(c, "REQ_BAD_JSON");
     }
     if (body === null || typeof body !== "object") {
-      return c.json({ error: "请求体必须是 JSON 对象" }, 400);
+      return fail(c, "REQ_BAD_BODY", "请求体必须是 JSON 对象");
     }
 
     // CSRF 加固：与文档接口一致，浏览器变更请求校验 Origin 同源
@@ -53,14 +54,14 @@ export function registerSettingsRoutes(app: Hono<AppEnv>): void {
     if (origin) {
       try {
         const host = c.req.header("Host") ?? new URL(c.req.url).host;
-        if (new URL(origin).host !== host) return c.json({ error: "跨站请求被拒绝" }, 403);
+        if (new URL(origin).host !== host) return fail(c, "CSRF_BLOCKED");
       } catch {
-        return c.json({ error: "Origin 不合法" }, 403);
+        return fail(c, "ORIGIN_INVALID");
       }
     }
 
     const parsed = validateSettingsUpdate(body as Parameters<typeof validateSettingsUpdate>[0]);
-    if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+    if (!parsed.ok) return fail(c, "SETTINGS_INVALID", parsed.error);
 
     await saveSiteSettings(c.env.DB, parsed.value, user.name);
 
