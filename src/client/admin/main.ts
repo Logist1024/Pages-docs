@@ -61,6 +61,9 @@ async function loadBrand(): Promise<void> {
     const s = await api.getSiteSettings();
     state.brand.siteName = s.site_name || "Pages Docs";
     state.brand.logo = s.logo;
+    state.supportedLangs = s.supported_langs && s.supported_langs.length > 0 ? s.supported_langs : ["en"];
+    state.defaultLang = s.default_lang || "en";
+    state.currentLang = state.defaultLang;
     // 自定义 favicon：替换 <link rel=icon>（后台 SPA 静态页默认用内置图标）
     if (s.favicon) {
       let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
@@ -233,6 +236,28 @@ function renderApp(): void {
   });
   toggleBtn.appendChild(icon("menu", 18));
 
+  // 语言选择器
+  const langSelect = el("select", {
+    className: "lang-select",
+    attrs: { "aria-label": "编辑语言" },
+    onChange: (ev) => {
+      state.currentLang = (ev.target as HTMLSelectElement).value;
+      // 语言切换后刷新文档树
+      refreshDocs();
+      // 如果当前打开了文档，尝试切换到该语言版本
+      if (state.currentDocId) {
+        openDocument(state.currentDocId);
+      }
+    },
+  });
+  for (const lang of state.supportedLangs) {
+    const opt = el("option", {
+      text: lang === "en" ? "English" : lang === "zh-CN" ? "中文" : lang,
+      attrs: { value: lang, selected: lang === state.currentLang },
+    });
+    langSelect.appendChild(opt);
+  }
+
   const topbar = el("header", { className: "topbar" }, [
     toggleBtn,
     el("div", { className: "brand" }, [
@@ -244,6 +269,7 @@ function renderApp(): void {
       userChip,
       logoutBtn,
       isAdmin() ? settingsBtn : null,
+      langSelect,
       el("a", { className: "view-site-link", text: "查看站点", attrs: { href: "/", target: "_blank", rel: "noopener" } }),
       themeBtn,
     ]),

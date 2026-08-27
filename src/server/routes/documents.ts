@@ -16,6 +16,7 @@ import type {
 interface DocRow {
   id: number;
   path: string;
+  lang: string;
   title: string;
   status: string;
   content_md: string;
@@ -32,6 +33,7 @@ function toSummary(row: DocRow): DocumentSummary {
   return {
     id: row.id,
     path: row.path,
+    lang: row.lang,
     title: row.title,
     status: row.status === "published" ? "published" : "draft",
     sort_order: row.sort_order ?? 0,
@@ -91,7 +93,14 @@ export async function getDetailById(db: D1Database, id: number): Promise<Documen
     .bind(id)
     .first<DocRowWithPublished>();
   if (!row) return null;
-  return toDetailWithPublished(row);
+  const detail = toDetailWithPublished(row);
+  // 获取该文档路径下所有可用语言
+  const { results: langRows } = await db
+    .prepare("SELECT lang FROM documents WHERE path = ?")
+    .bind(row.path)
+    .all<{ lang: string }>();
+  detail.available_langs = langRows.map((r) => r.lang);
+  return detail;
 }
 
 async function requireUser(c: { env: AppEnv["Bindings"]; req: { raw: Request } }): Promise<SessionUser | null> {
@@ -104,22 +113,45 @@ const MAX_TITLE_LEN = 200;
 /** 已发布文档的对外可见内容来自最近一次发布的快照（revisions），而非草稿 */
 export async function getDocByPath(
   db: D1Database,
-  path: string
+  path: string,
+  lang: string = "en"
 ): Promise<{ row: DocRow; publishedContent: string | null } | null> {
   const row = await db
     .prepare(
       `SELECT d.*, r.content_md AS pub_content
        FROM documents d LEFT JOIN revisions r ON r.id = d.current_revision_id
-       WHERE d.path = ?`
+       WHERE d.path = ? AND d.lang = ?`
     )
-    .bind(path)
+    .bind(path, lang)
     .first<DocRow & { pub_content: string | null }>();
   if (!row) return null;
   return { row, publishedContent: row.pub_content ?? (row.status === "published" ? row.content_md : null) };
 }
 
-export async function listPublishedPaths(db: D1Database): Promise<string[]> {
-  const { results } = await db.prepare("SELECT path FROM documents WHERE status = 'published'").all<{ path: string }>();
+export async function getDocByPathFallback(
+  db: D1Database,
+  path: string,
+  lang: string,
+  defaultLang: string
+): Promise<{ row: DocRow; publishedContent: string | null; fallback: boolean } | null> {
+  // 先尝试请求的语言
+  let result = await getDocByPath(db, path, lang);
+  if (result) return { ...result, fallback: false };
+  // 回退到默认语言
+  if (lang !== defaultLang) {
+    result = await getDocByPath(db, path, defaultLang);
+    if (result) return { ...result, fallback: true };
+  }
+  return null;
+}
+
+export async function listPublishedPaths(db: D1Database, lang?: string): Promise<string[]> {
+  const sql = lang
+    ? "SELECT path FROM documents WHERE status = 'published' AND lang = ?"
+    : "SELECT path FROM documents WHERE status = 'published'";
+  const stmt = db.prepare(sql);
+  if (lang) stmt.bind(lang);
+  const { results } = await stmt.all<{ path: string }>();
   return results.map((r) => r.path);
 }
 
@@ -196,17 +228,21 @@ export function registerDocumentRoutes(app: Hono<AppEnv>): void {
   // POST /api/docs —— 新建草稿
   api.post("/docs", async (c) => {
     const user = c.get("user")!
-    let body: { path?: unknown; title?: unknown; content_md?: unknown };
+    let body: { path?: unknown; lang?: unknown; title?: unknown; content_md?: unknown };
     try {
       body = await c.req.json();
     } catch {
       return fail(c, "REQ_BAD_JSON");
     }
     const path = typeof body.path === "string" ? body.path.trim().toLowerCase() : "";
+    const lang = typeof body.lang === "string" ? body.lang.trim().toLowerCase() : "en";
     const title = typeof body.title === "string" ? body.title.trim() : "";
     const content = typeof body.content_md === "string" ? body.content_md : "";
     if (!isValidDocPath(path)) {
       return fail(c, "DOC_INVALID_PATH", "path 只允许小写字母/数字/-/_，用 / 分层，如 guide/intro");
+    }
+    if (!/^[a-z]{2}(-[A-Z]{2})?$/.test(lang)) {
+      return fail(c, "DOC_INVALID_LANG", "语言代码格式不合法（如 en、zh-CN）");
     }
     if (isReservedCreatePath(path)) {
       return fail(c, "REQ_RESERVED_PATH", `「/${path}」为系统保留路径（docs、admin、api 等），不能使用`);
@@ -221,9 +257,9 @@ export function registerDocumentRoutes(app: Hono<AppEnv>): void {
       // RETURNING 取新 id：不依赖 meta.last_row_id（D1 生产环境可能返回 null）
       const sortOrder = await nextSiblingSortOrder(c.env.DB, path);
       const result = await c.env.DB.prepare(
-        "INSERT INTO documents (path, title, status, content_md, revision_seq, sort_order, updated_by, created_at, updated_at) VALUES (?, ?, 'draft', ?, 0, ?, ?, ?, ?) RETURNING id"
+        "INSERT INTO documents (path, lang, title, status, content_md, revision_seq, sort_order, updated_by, created_at, updated_at) VALUES (?, ?, ?, 'draft', ?, 0, ?, ?, ?, ?) RETURNING id"
       )
-        .bind(path, title, content, sortOrder, user.name, now, now)
+        .bind(path, lang, title, content, sortOrder, user.name, now, now)
         .all<{ id: number }>();
       const id = result.results[0]?.id;
       if (id === undefined) throw new Error("INSERT 未返回 id");
@@ -243,12 +279,12 @@ export function registerDocumentRoutes(app: Hono<AppEnv>): void {
     return c.json(detail);
   });
 
-  // PUT /api/docs/:id —— 自动保存 / 改名 / 移动（base_revision_seq 冲突检测，PLAN 4.3）
+  // PUT /api/docs/:id —— 自动保存 / 改名 / 移动 / 切换语言（base_revision_seq 冲突检测，PLAN 4.3）
   api.put("/docs/:id", async (c) => {
     const user = c.get("user")!
     const id = toId(c.req.param("id"));
     if (id === null) return fail(c, "DOC_NOT_FOUND");
-    let body: { base_revision_seq?: unknown; title?: unknown; path?: unknown; content_md?: unknown };
+    let body: { base_revision_seq?: unknown; title?: unknown; path?: unknown; lang?: unknown; content_md?: unknown };
     try {
       body = await c.req.json();
     } catch {
@@ -287,6 +323,14 @@ export function registerDocumentRoutes(app: Hono<AppEnv>): void {
         }
         updates.push("path = ?");
         binds.push(path);
+      }
+    }
+    if (body.lang !== undefined) {
+      const lang = typeof body.lang === "string" ? body.lang.trim().toLowerCase() : "";
+      if (!/^[a-z]{2}(-[A-Z]{2})?$/.test(lang)) return fail(c, "DOC_INVALID_LANG", "语言代码格式不合法（如 en、zh-CN）");
+      if (lang !== row.lang) {
+        updates.push("lang = ?");
+        binds.push(lang);
       }
     }
     if (updates.length === 0) return fail(c, "DOC_NO_FIELDS");
@@ -371,8 +415,8 @@ export function registerDocumentRoutes(app: Hono<AppEnv>): void {
     // D1 batch 在同一事务内顺序执行；第二条用子查询取到刚插入的快照 id
     await c.env.DB.batch([
       c.env.DB.prepare(
-        "INSERT INTO revisions (document_id, title, content_md, author_name, note, created_at) VALUES (?, ?, ?, ?, ?, ?)"
-      ).bind(id, row.title, row.content_md, user.name, note, now),
+        "INSERT INTO revisions (document_id, lang, title, content_md, author_name, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      ).bind(id, row.lang, row.title, row.content_md, user.name, note, now),
       c.env.DB.prepare(
         `UPDATE documents SET status = 'published',
            current_revision_id = (SELECT MAX(id) FROM revisions WHERE document_id = ?),
@@ -455,8 +499,8 @@ export function registerDocumentRoutes(app: Hono<AppEnv>): void {
     // 与发布流程一致：batch 同一事务内先插快照，再原子更新文档指针
     await c.env.DB.batch([
       c.env.DB.prepare(
-        "INSERT INTO revisions (document_id, title, content_md, author_name, note, created_at) VALUES (?, ?, ?, ?, ?, ?)"
-      ).bind(rev.document_id, rev.title, rev.content_md, user.name, `回滚自 v#${rev.id}`, now),
+        "INSERT INTO revisions (document_id, lang, title, content_md, author_name, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      ).bind(rev.document_id, rev.lang, rev.title, rev.content_md, user.name, `回滚自 v#${rev.id}`, now),
       c.env.DB.prepare(
         `UPDATE documents SET title = ?, content_md = ?, status = 'published',
            current_revision_id = (SELECT MAX(id) FROM revisions WHERE document_id = ?),

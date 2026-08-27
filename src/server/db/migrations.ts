@@ -36,7 +36,8 @@ CREATE INDEX IF NOT EXISTS idx_sessions_name ON sessions(name)`;
 const SQL_DOCUMENTS = `
 CREATE TABLE IF NOT EXISTS documents (
   id INTEGER PRIMARY KEY,
-  path TEXT UNIQUE NOT NULL,
+  path TEXT NOT NULL,
+  lang TEXT NOT NULL DEFAULT 'en',
   title TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'draft',
   content_md TEXT NOT NULL DEFAULT '',
@@ -44,16 +45,18 @@ CREATE TABLE IF NOT EXISTS documents (
   current_revision_id INTEGER,
   updated_by TEXT,
   created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  updated_at INTEGER NOT NULL,
+  UNIQUE(path, lang)
 )`;
 
 const SQL_DOCUMENTS_INDEX = `
-CREATE INDEX IF NOT EXISTS idx_documents_status_path ON documents(status, path)`;
+CREATE INDEX IF NOT EXISTS idx_documents_status_path ON documents(status, path, lang)`;
 
 const SQL_REVISIONS = `
 CREATE TABLE IF NOT EXISTS revisions (
   id INTEGER PRIMARY KEY,
   document_id INTEGER NOT NULL REFERENCES documents(id),
+  lang TEXT NOT NULL DEFAULT 'en',
   title TEXT NOT NULL,
   content_md TEXT NOT NULL,
   author_name TEXT NOT NULL,
@@ -77,15 +80,17 @@ CREATE TABLE IF NOT EXISTS attachments (
 
 // 全文搜索：普通 FTS5 表（存储文本以支持 snippet），触发器同步已发布快照
 // 语义约定：documents.content_md 是工作副本（草稿）；读者可见内容 = current_revision_id 指向的 revisions.content_md。
+// 多语言：每语言一个 FTS 表（documents_fts_en, documents_fts_zh-CN 等），或统一表带 lang 列。
+// 这里用统一表 + lang 列，MATCH 时按 lang 过滤。
 const SQL_FTS = `
 CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
-  title, body, tokenize='unicode61'
+  title, body, lang, tokenize='unicode61'
 )`;
 
 const SQL_TRIGGER_AI = `
 CREATE TRIGGER IF NOT EXISTS documents_fts_ai AFTER INSERT ON documents BEGIN
-  INSERT INTO documents_fts(rowid, title, body)
-  SELECT NEW.id, r.title, r.content_md
+  INSERT INTO documents_fts(rowid, title, body, lang)
+  SELECT NEW.id, r.title, r.content_md, NEW.lang
   FROM revisions r
   WHERE r.id = NEW.current_revision_id AND NEW.status = 'published';
 END`;
@@ -93,8 +98,8 @@ END`;
 const SQL_TRIGGER_AU = `
 CREATE TRIGGER IF NOT EXISTS documents_fts_au AFTER UPDATE ON documents BEGIN
   DELETE FROM documents_fts WHERE rowid = OLD.id;
-  INSERT INTO documents_fts(rowid, title, body)
-  SELECT NEW.id, r.title, r.content_md
+  INSERT INTO documents_fts(rowid, title, body, lang)
+  SELECT NEW.id, r.title, r.content_md, NEW.lang
   FROM revisions r
   WHERE r.id = NEW.current_revision_id AND NEW.status = 'published';
 END`;
@@ -175,6 +180,42 @@ export const MIGRATIONS: Migration[] = [
     // 目录与文档手动排序：后台侧栏与阅读页目录共用同一顺序。
     statements: [SQL_DOCUMENTS_SORT, SQL_FOLDERS_SORT].map((s) => s.trim()),
   },
+  {
+    version: 6,
+    name: "0006_i18n",
+    // 多语言支持：documents 增加 lang 列、复合唯一索引 (path, lang)；
+    // revisions 增加 lang 列；FTS 表增加 lang 列并更新触发器。
+    statements: [
+      "ALTER TABLE documents ADD COLUMN lang TEXT NOT NULL DEFAULT 'en'",
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_path_lang ON documents(path, lang)",
+      "DROP INDEX IF EXISTS idx_documents_status_path",
+      "CREATE INDEX IF NOT EXISTS idx_documents_status_path ON documents(status, path, lang)",
+      "ALTER TABLE revisions ADD COLUMN lang TEXT NOT NULL DEFAULT 'en'",
+      // FTS 表重建：SQLite 不支持 ALTER TABLE ADD COLUMN ON VIRTUAL TABLE
+      // 需要重建表，通过触发器迁移数据
+      `DROP TABLE IF EXISTS documents_fts`,
+      `CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(title, body, lang, tokenize='unicode61')`,
+      `DROP TRIGGER IF EXISTS documents_fts_ai`,
+      `DROP TRIGGER IF EXISTS documents_fts_au`,
+      `DROP TRIGGER IF EXISTS documents_fts_ad`,
+      `CREATE TRIGGER IF NOT EXISTS documents_fts_ai AFTER INSERT ON documents BEGIN
+        INSERT INTO documents_fts(rowid, title, body, lang)
+        SELECT NEW.id, r.title, r.content_md, NEW.lang
+        FROM revisions r
+        WHERE r.id = NEW.current_revision_id AND NEW.status = 'published';
+      END`,
+      `CREATE TRIGGER IF NOT EXISTS documents_fts_au AFTER UPDATE ON documents BEGIN
+        DELETE FROM documents_fts WHERE rowid = OLD.id;
+        INSERT INTO documents_fts(rowid, title, body, lang)
+        SELECT NEW.id, r.title, r.content_md, NEW.lang
+        FROM revisions r
+        WHERE r.id = NEW.current_revision_id AND NEW.status = 'published';
+      END`,
+      `CREATE TRIGGER IF NOT EXISTS documents_fts_ad AFTER DELETE ON documents BEGIN
+        DELETE FROM documents_fts WHERE rowid = OLD.id;
+      END`,
+    ].map((s) => s.trim()),
+  },
 ];
 
-export const LATEST_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version;
+export const LATEST_VERSION = 6;

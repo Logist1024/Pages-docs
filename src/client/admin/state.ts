@@ -11,6 +11,12 @@ export const state = {
   currentDocId: null as number | null,
   /** 站点品牌（来自公开的 /api/settings）：后台顶栏 / 登录页 LOGO 与站点名 */
   brand: { siteName: "", logo: null as string | null },
+  /** 当前编辑语言（默认 en） */
+  currentLang: "en" as string,
+  /** 支持的语言列表（来自站点设置） */
+  supportedLangs: ["en"] as string[],
+  /** 默认语言（来自站点设置） */
+  defaultLang: "en" as string,
 };
 
 export function isAdmin(): boolean {

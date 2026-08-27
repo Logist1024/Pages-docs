@@ -6,6 +6,7 @@ function doc(path: string, title = path, sortOrder = 0): DocumentSummary {
   return {
     id: path.length,
     path,
+    lang: "en",
     title,
     status: "published",
     sort_order: sortOrder,

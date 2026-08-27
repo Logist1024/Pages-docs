@@ -20,6 +20,8 @@ function toSettingsBody(resolved: Awaited<ReturnType<typeof loadSiteSettings>>):
     logo: resolved.logo,
     notice: resolved.notice,
     footer: resolved.footer,
+    default_lang: resolved.defaultLang,
+    supported_langs: resolved.supportedLangs,
   };
 }
 

@@ -1,4 +1,5 @@
 import type { Role } from "../shared/types";
+import type { ResolvedSiteSettings } from "./settings";
 
 /** 最小结构化类型：Workers Rate Limiting binding（避免依赖具体 workers-types 版本） */
 export interface RateLimitBinding {
@@ -26,5 +27,14 @@ export interface SessionUser {
   role: Role;
 }
 
+export interface I18nContext {
+  lang: string;
+  path: string;
+  hasPrefix: boolean;
+  defaultLang: string;
+  supportedLangs: string[];
+  settings: ResolvedSiteSettings;
+}
+
 /** Hono 泛型环境 */
-export type AppEnv = { Bindings: Env; Variables: { user?: SessionUser } };
+export type AppEnv = { Bindings: Env; Variables: { user?: SessionUser; i18n?: I18nContext } };

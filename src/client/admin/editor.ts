@@ -30,6 +30,7 @@ let publishBtn: HTMLButtonElement | null = null;
 let unpublishBtn: HTMLButtonElement | null = null;
 let vditorMount: HTMLElement | null = null;
 let vditorHost: HTMLElement | null = null;
+let langSelect: HTMLSelectElement | null = null;
 
 /** document/window 级监听器只绑定一次的标记（renderEditorView 可能多次执行） */
 let globalListenersBound = false;
@@ -148,6 +149,29 @@ export function renderEditorView(parent: HTMLElement): void {
 
   const moreWrap = buildMoreMenu();
 
+  // 语言选择器（编辑器工具栏）
+  langSelect = null;
+  if (state.supportedLangs.length > 1) {
+    langSelect = el("select", {
+      className: "lang-select",
+      attrs: { "aria-label": "文档语言" },
+      onChange: (ev) => {
+        const newLang = (ev.target as HTMLSelectElement).value;
+        if (docId !== null && newLang !== state.currentLang) {
+          // 切换语言：尝试打开该语言版本
+          switchDocumentLanguage(docId, newLang);
+        }
+      },
+    });
+    for (const lang of state.supportedLangs) {
+      const opt = el("option", {
+        text: lang === "en" ? "English" : lang === "zh-CN" ? "中文" : lang,
+        attrs: { value: lang, selected: lang === state.currentLang },
+      });
+      langSelect.appendChild(opt);
+    }
+  }
+
   const toolbar = el("div", { className: "editor-toolbar" }, [
     statusBadge,
     titleInput,
@@ -156,6 +180,7 @@ export function renderEditorView(parent: HTMLElement): void {
     publishBtn,
     unpublishBtn,
     historyBtn,
+    langSelect,
     moreWrap.root,
   ]);
 
@@ -831,6 +856,11 @@ async function applyDetail(detail: DocumentDetail): Promise<void> {
   publishedContent = detail.published_content_md;
   lastContent = detail.content_md;
   lastTitle = detail.title;
+  
+  // 更新语言选择器
+  state.currentLang = detail.lang;
+  if (langSelect) langSelect.value = detail.lang;
+  
   vditor?.setValue(detail.content_md, true);
   if (titleInput) {
     titleInput.value = detail.title;
@@ -1162,4 +1192,54 @@ export async function flushPendingChanges(): Promise<void> {
 export async function applyExternalDetail(detail: DocumentDetail): Promise<void> {
   if (docId !== detail.id) return;
   await applyDetail(detail);
+}
+
+/** 切换文档语言版本：尝试打开同路径的另一语言版本，不存在则提示创建 */
+async function switchDocumentLanguage(currentId: number, newLang: string): Promise<void> {
+  if (newLang === state.currentLang) return;
+  
+  // 先保存当前修改
+  if (dirty || inFlightPromise) {
+    await flushSave();
+    if (dirty) return; // 保存失败或冲突未解决
+  }
+  
+  try {
+    // 获取当前文档路径
+    const currentDoc = state.docs.find(d => d.id === currentId);
+    if (!currentDoc) return;
+    
+    // 尝试查找目标语言版本
+    const targetDoc = state.docs.find(d => d.path === currentDoc.path && d.lang === newLang);
+    if (targetDoc) {
+      // 存在该语言版本，直接打开
+      state.currentLang = newLang;
+      if (langSelect) langSelect.value = newLang;
+      location.hash = `#/doc/${targetDoc.id}`;
+      return;
+    }
+    
+    // 不存在：询问是否基于当前内容创建翻译版本
+    const createTranslation = await confirmDialog({
+      title: "创建翻译版本",
+      message: `文档「${currentDoc.title}」暂无 ${newLang} 版本。是否基于当前内容创建？`,
+      confirmText: "创建翻译",
+    });
+    if (!createTranslation) return;
+    
+    // 创建新文档（同路径、不同语言）
+    const detail = await api.createDoc({
+      path: currentDoc.path,
+      lang: newLang,
+      title: currentDoc.title,
+      content_md: vditor?.getValue() ?? "",
+    });
+    
+    state.currentLang = newLang;
+    if (langSelect) langSelect.value = newLang;
+    toast(`已创建 ${newLang} 版本`, "success");
+    location.hash = `#/doc/${detail.id}`;
+  } catch (e) {
+    toast(`切换语言失败：${errMessage(e)}`, "error");
+  }
 }

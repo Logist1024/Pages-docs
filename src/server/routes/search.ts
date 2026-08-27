@@ -9,26 +9,27 @@ import type { SearchHit, SessionRow } from "../../shared/types";
 export interface SearchRow {
   id: number;
   path: string;
+  lang: string;
   title: string;
   excerpt: string;
 }
 
 /** FTS5 搜索（仅 published 快照）。供 /api/search 与 /search 页共用 */
-export async function searchDocuments(db: D1Database, query: string, limit = 20): Promise<SearchHit[]> {
+export async function searchDocuments(db: D1Database, query: string, lang: string = "en", limit = 20): Promise<SearchHit[]> {
   const match = ftsQueryOf(query);
   if (!match) return [];
   try {
     const { results } = await db
       .prepare(
-        `SELECT d.id, d.path, d.title,
+        `SELECT d.id, d.path, d.lang, d.title,
                 snippet(documents_fts, 1, '<mark>', '</mark>', '…', 16) AS excerpt
          FROM documents_fts f
          JOIN documents d ON d.id = f.rowid
-         WHERE documents_fts MATCH ?1 AND d.status = 'published'
+         WHERE documents_fts MATCH ?1 AND d.status = 'published' AND d.lang = ?2
          ORDER BY bm25(documents_fts)
-         LIMIT ?2`
+         LIMIT ?3`
       )
-      .bind(match, limit)
+      .bind(match, lang, limit)
       .all<SearchRow>();
     return results.map((r) => ({ ...r, excerpt: prettifyExcerpt(r.excerpt) }));
   } catch {
@@ -63,8 +64,9 @@ export function registerSearchRoute(app: Hono<AppEnv>): void {
   // 公开：只返回已发布内容的命中（PLAN 4.2 精神：未登录只见 published）
   app.get("/api/search", async (c) => {
     const q = (c.req.query("q") ?? "").trim().slice(0, 100);
+    const lang = (c.req.query("lang") ?? "en").trim().toLowerCase();
     if (!q) return c.json({ hits: [], total: 0 });
-    const hits = await searchDocuments(c.env.DB, q);
+    const hits = await searchDocuments(c.env.DB, q, lang);
     return c.json({ hits, total: hits.length });
   });
 }

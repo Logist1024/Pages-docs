@@ -10,6 +10,7 @@ export type Role = "admin" | "editor";
 export interface DocumentSummary {
   id: number;
   path: string;
+  lang: string;
   title: string;
   status: DocStatus;
   /** 手动排序值（同级内升序在前；0 为未排序默认值） */
@@ -29,11 +30,14 @@ export interface DocumentDetail extends DocumentSummary {
   published_title: string | null;
   /** 当前发布快照的正文；从未发布为 null */
   published_content_md: string | null;
+  /** 可用的语言版本列表（用于语言切换器） */
+  available_langs?: string[];
 }
 
 /** POST /api/docs · 新建文档 */
 export interface CreateDocumentInput {
   path: string;
+  lang?: string;
   title: string;
   content_md?: string;
 }
@@ -43,6 +47,7 @@ export interface UpdateDocumentInput {
   base_revision_seq: number;
   title?: string;
   path?: string;
+  lang?: string;
   content_md?: string;
 }
 
@@ -70,6 +75,7 @@ export interface SaveResult {
 export interface RevisionSummary {
   id: number;
   document_id: number;
+  lang: string;
   title: string;
   author_name: string;
   note: string | null;
@@ -91,6 +97,7 @@ export interface MeInfo {
 export interface SearchHit {
   id: number;
   path: string;
+  lang: string;
   title: string;
   excerpt: string;
 }
@@ -164,6 +171,10 @@ export interface SiteSettings {
   notice: NoticeBar | null;
   /** 页脚自定义 HTML（版权声明等）；null 表示不显示页脚 */
   footer: string | null;
+  /** 默认语言代码（如 en、zh-CN）；默认 en */
+  default_lang: string | null;
+  /** 支持的语言列表（语言代码数组，如 ["en", "zh-CN"]）；默认 ["en"] */
+  supported_langs: string[] | null;
 }
 
 /** PUT /api/settings · 更新站点设置（仅 admin）；字段可选，传 null 恢复默认 */
@@ -175,6 +186,8 @@ export interface UpdateSiteSettingsInput {
   logo?: string | null;
   notice?: NoticeBar | null;
   footer?: string | null;
+  default_lang?: string | null;
+  supported_langs?: string[] | null;
 }
 
 /** PUT /api/folders/:path · 目录改名 / 移动（name 与 path 均可选） */
