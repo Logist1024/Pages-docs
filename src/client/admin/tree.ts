@@ -301,7 +301,7 @@ function renderFolderRow(folder: FolderNode, depth: number, container: HTMLEleme
   if (!initialized && depth === 0) expandedFolders.add(folder.path);
   const expanded = expandedFolders.has(folder.path);
 
-  const childrenBox = el("div", { className: "tree-children" });
+  const childrenBox = el("div", { className: "tree-children" + (expanded ? " expanded" : "") });
   const actions = buildFolderActions(folder);
   actions.insertBefore(buildMoveButtons({ kind: "folder", node: folder }), actions.firstChild);
   const row = el("div", {
@@ -318,13 +318,24 @@ function renderFolderRow(folder: FolderNode, depth: number, container: HTMLEleme
     else expandedFolders.add(folder.path);
     render();
   };
-  row.onclick = () => toggle();
+  row.onclick = (ev) => {
+    if ((ev.target as HTMLElement).closest(".row-action-btn")) return;
+    toggle();
+  };
   row.onkeydown = (ev) => {
     if (ev.key === "Enter" || ev.key === " ") {
       ev.preventDefault();
       toggle();
+    } else if (ev.key === "ArrowRight" && !expanded) {
+      ev.preventDefault();
+      toggle();
+    } else if (ev.key === "ArrowLeft" && expanded) {
+      ev.preventDefault();
+      toggle();
     }
   };
+  row.onmousedown = () => row.classList.add("pressing");
+  row.onmouseup = row.onmouseleave = () => row.classList.remove("pressing");
 
   container.appendChild(row);
   container.appendChild(childrenBox);
@@ -345,13 +356,18 @@ function renderDocRow(doc: DocumentSummary, container: HTMLElement): void {
     badge,
     actions,
   ]);
-  row.onclick = () => navigateToDoc(doc.id);
+  row.onclick = (ev) => {
+    if ((ev.target as HTMLElement).closest(".row-action-btn")) return;
+    navigateToDoc(doc.id);
+  };
   row.onkeydown = (ev) => {
     if (ev.key === "Enter" || ev.key === " ") {
       ev.preventDefault();
       navigateToDoc(doc.id);
     }
   };
+  row.onmousedown = () => row.classList.add("pressing");
+  row.onmouseup = row.onmouseleave = () => row.classList.remove("pressing");
   container.appendChild(row);
 }
 

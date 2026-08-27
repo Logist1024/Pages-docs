@@ -29,6 +29,7 @@ let saveStatusEl: HTMLElement | null = null;
 let publishBtn: HTMLButtonElement | null = null;
 let unpublishBtn: HTMLButtonElement | null = null;
 let vditorMount: HTMLElement | null = null;
+let vditorHost: HTMLElement | null = null;
 
 /** document/window 级监听器只绑定一次的标记（renderEditorView 可能多次执行） */
 let globalListenersBound = false;
@@ -96,6 +97,12 @@ export function renderEditorView(parent: HTMLElement): void {
   lastSavedTitle = "";
   publishedTitle = null;
   publishedContent = null;
+  lastContent = "";
+  lastTitle = "";
+  if (contentCheckTimer !== null) {
+    window.clearInterval(contentCheckTimer);
+    contentCheckTimer = null;
+  }
   openToken++;
 
   container = parent;
@@ -110,7 +117,7 @@ export function renderEditorView(parent: HTMLElement): void {
 
   titleInput = el("input", {
     className: "doc-title-input",
-    attrs: { type: "text", placeholder: "无标题文档", autocomplete: "off" },
+    attrs: { type: "text", placeholder: "无标题文档", autocomplete: "off", disabled: "true" },
     onInput: () => markDirty(),
   });
 
@@ -152,8 +159,12 @@ export function renderEditorView(parent: HTMLElement): void {
     moreWrap.root,
   ]);
 
-  const vditorHost = el("div", { className: "vditor-host" }, [
+  vditorHost = el("div", { className: "vditor-host" }, [
     el("div", { className: "vditor-mount" }),
+    el("div", { className: "vditor-loading" }, [
+      el("div", { className: "loading-spinner" }),
+      el("span", { text: "编辑器初始化中…" }),
+    ]),
   ]);
   const mountPoint = vditorHost.querySelector(".vditor-mount");
   if (!(mountPoint instanceof HTMLElement)) {
@@ -365,6 +376,9 @@ function ensureVditor(): Promise<void> {
         },
         after: () => {
           stripPreviewCopyButtons();
+          const loading = vditorHost?.querySelector(".vditor-loading");
+          if (loading) (loading as HTMLElement).style.display = "none";
+          if (titleInput) titleInput.disabled = false;
           resolve();
         },
         input: () => markDirty(),
@@ -551,12 +565,48 @@ function refreshPublishButton(): void {
 
 /* ---------------- 自动保存核心 ---------------- */
 
+let lastContent = "";
+let lastTitle = "";
+let contentCheckTimer: number | null = null;
+
 function markDirty(): void {
   if (suppressInput || docId === null) return;
-  dirty = true;
-  setSaveStatus("unsaved");
-  refreshPublishButton();
+  if (!dirty) {
+    dirty = true;
+    setSaveStatus("unsaved");
+    refreshPublishButton();
+    lastContent = vditor?.getValue() ?? "";
+    lastTitle = titleInput?.value ?? "";
+  }
   scheduleSave();
+  startContentCheck();
+}
+
+function startContentCheck(): void {
+  if (contentCheckTimer !== null) return;
+  contentCheckTimer = window.setInterval(() => {
+    if (docId === null || !dirty) {
+      if (contentCheckTimer !== null) {
+        window.clearInterval(contentCheckTimer);
+        contentCheckTimer = null;
+      }
+      return;
+    }
+    const currentContent = vditor?.getValue() ?? "";
+    const currentTitle = titleInput?.value ?? "";
+    if (currentContent === lastContent && currentTitle === lastTitle) {
+      dirty = false;
+      setSaveStatus("idle");
+      refreshPublishButton();
+      if (contentCheckTimer !== null) {
+        window.clearInterval(contentCheckTimer);
+        contentCheckTimer = null;
+      }
+    } else {
+      lastContent = currentContent;
+      lastTitle = currentTitle;
+    }
+  }, 3000);
 }
 
 function scheduleSave(): void {
@@ -597,9 +647,10 @@ function flushSave(): Promise<void> {
   const title = titleInput?.value ?? "";
   const content = vditor?.getValue() ?? "";
 
-  dirty = false;
   lastSaveFailed = false;
   setSaveStatus("saving");
+  lastContent = content;
+  lastTitle = title;
 
   const p = (async () => {
     try {
@@ -611,6 +662,7 @@ function flushSave(): Promise<void> {
       if (docId !== id) return; // 已切走：丢弃旧文档的结果
       revisionSeq = res.revision_seq;
       lastSavedTitle = title;
+      dirty = false;
       // 在途期间用户又输入了内容则仍视为脏
       dirty = (vditor?.getValue() ?? "") !== content || (titleInput?.value ?? "") !== title;
       setSaveStatus("saved", res.saved_at);
@@ -777,8 +829,13 @@ async function applyDetail(detail: DocumentDetail): Promise<void> {
   lastSavedTitle = detail.title;
   publishedTitle = detail.published_title;
   publishedContent = detail.published_content_md;
+  lastContent = detail.content_md;
+  lastTitle = detail.title;
   vditor?.setValue(detail.content_md, true);
-  if (titleInput) titleInput.value = detail.title;
+  if (titleInput) {
+    titleInput.value = detail.title;
+    titleInput.disabled = false;
+  }
   setStatusBadge(detail.status);
   refreshPublishButton();
   setSaveStatus("saved", detail.updated_at);
@@ -828,7 +885,12 @@ export async function showEmpty(): Promise<void> {
   currentPath = "";
   currentStatus = null;
   state.currentDocId = null;
-  setActiveDoc(null);
+  lastContent = "";
+  lastTitle = "";
+  if (contentCheckTimer !== null) {
+    window.clearInterval(contentCheckTimer);
+    contentCheckTimer = null;
+  }
   showView("empty");
 }
 

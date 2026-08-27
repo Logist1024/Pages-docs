@@ -222,16 +222,23 @@ async function renderMermaidBlocks(): Promise<void> {
     const source = block.textContent ?? "";
     const pre = block.closest("pre");
     if (!pre || !source.trim()) continue;
+    const loader = document.createElement("div");
+    loader.className = "mermaid-loader";
+    loader.innerHTML = '<div class="mermaid-spinner"></div><span>渲染图表中…</span>';
+    pre.replaceWith(loader);
     try {
       mod ??= await loadMermaid();
       const { svg } = await mod.default.render(`mermaid-${++seq}`, source);
       const holder = document.createElement("div");
       holder.className = "mermaid-figure";
       holder.innerHTML = svg;
-      pre.replaceWith(holder);
+      loader.replaceWith(holder);
     } catch (error) {
       console.error("[pages-docs] mermaid 渲染失败", error);
-      pre.classList.add("mermaid-error"); // 失败时保留源码展示
+      const errDiv = document.createElement("pre");
+      errDiv.className = "mermaid-error";
+      errDiv.textContent = source;
+      loader.replaceWith(errDiv);
     }
   }
 }
@@ -292,9 +299,14 @@ function setupMobilePanels(): void {
   const syncScrollLock = (): void => {
     document.body.classList.toggle("drawer-open", Boolean(sbBox?.checked));
   };
+
+  // 监听 checkbox 状态变化（包括用户点击、JS 设置、CSS label 触发）
+  const observer = new MutationObserver(() => {
+    syncScrollLock();
+  });
   for (const box of boxes) {
+    observer.observe(box, { attributes: true, attributeFilter: ["checked"] });
     box.addEventListener("change", () => {
-      // 设置 .checked 不触发 change，不会级联；打开一个就收起另一个
       if (box.checked) {
         for (const other of boxes) {
           if (other !== box) other.checked = false;
@@ -303,6 +315,7 @@ function setupMobilePanels(): void {
       syncScrollLock();
     });
   }
+
   document.addEventListener("keydown", (ev) => {
     if (ev.key !== "Escape") return;
     let closed = false;
@@ -314,18 +327,20 @@ function setupMobilePanels(): void {
     }
     if (closed) syncScrollLock();
   });
+
+  syncScrollLock();
 }
 
 function boot(): void {
   localizeTimes();
-  highlightCode();
-  addCopyButtons();
   setupTocSpy();
   setupDelegatedHandlers();
   setupCopySource();
   dismissRememberedNotice();
   hideBrokenNavIcons();
   setupMobilePanels();
+  requestIdleCallback(highlightCode, { timeout: 1000 });
+  requestIdleCallback(addCopyButtons, { timeout: 1500 });
   void renderMermaidBlocks();
 }
 

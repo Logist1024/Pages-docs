@@ -96,8 +96,17 @@ export function toast(message: string, type: "success" | "error" = "success"): v
   const item = el("div", { className: `toast toast-${type}` }, [
     icon(type === "success" ? "check" : "x", 15),
     el("span", { text: message }),
+    el("div", { className: "toast-progress" }),
   ]);
   container.appendChild(item);
+  const progress = item.querySelector(".toast-progress") as HTMLElement;
+  if (progress) {
+    progress.style.transition = "width 3s linear";
+    progress.style.width = "100%";
+    window.requestAnimationFrame(() => {
+      progress.style.width = "0%";
+    });
+  }
   window.setTimeout(() => {
     item.classList.add("leaving");
     window.setTimeout(() => item.remove(), 280);
@@ -132,10 +141,12 @@ class ModalHandleImpl implements ModalHandle {
   overlay: HTMLElement;
   private onClose: (() => void) | undefined;
   private closed = false;
+  private triggerEl: HTMLElement | null = null;
 
   constructor(overlay: HTMLElement, onClose?: () => void) {
     this.overlay = overlay;
     this.onClose = onClose;
+    this.triggerEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   }
 
   close(): void {
@@ -147,6 +158,10 @@ class ModalHandleImpl implements ModalHandle {
     if (openModals.length === 0) {
       document.removeEventListener("keydown", modalKeydown, true);
       document.body.style.removeProperty("overflow");
+    }
+    // 恢复焦点到触发元素
+    if (this.triggerEl && document.body.contains(this.triggerEl)) {
+      this.triggerEl.focus();
     }
     this.onClose?.();
   }

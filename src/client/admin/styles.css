@@ -470,8 +470,10 @@ a:hover { color: var(--primary-hover); }
   font-weight: 600;
   font-size: 14px;
   user-select: none;
+  transition: background 0.12s ease, color 0.12s ease;
 }
 .tree-folder-row:hover { background: var(--hover-soft); color: var(--text); }
+.tree-folder-row.pressing { background: var(--hover-soft); color: var(--text); }
 .tree-folder-row > .icon { color: #d9a03f; }
 
 .tree-caret {
@@ -481,7 +483,7 @@ a:hover { color: var(--primary-hover); }
   border-left: 5px solid currentColor;
   border-top: 4px solid transparent;
   border-bottom: 4px solid transparent;
-  transition: transform 0.15s;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   opacity: 0.7;
   flex-shrink: 0;
 }
@@ -498,17 +500,27 @@ a:hover { color: var(--primary-hover); }
 
 /* 目录行悬停操作（上移/下移/新建文档/重命�?删除空目录） */
 .row-actions {
-  display: none;
+  display: inline-flex;
   gap: 2px;
   margin-left: auto;
   flex-shrink: 0;
+  opacity: 0;
+  transform: translateX(8px);
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
 }
 .tree-folder-row:hover .row-actions,
 .tree-folder-row:focus-within .row-actions,
 .tree-doc-row:hover .doc-row-actions,
-.tree-doc-row:focus-within .doc-row-actions { display: inline-flex; }
-/* 文档行的排序动作悬浮于行右侧（不挤占标题布局�?*/
-.doc-row-actions { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); }
+.tree-doc-row:focus-within .doc-row-actions {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+/* 文档行的排序动作悬浮于行右侧（不挤占标题布局） */
+.doc-row-actions { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); opacity: 0; transition: opacity 0.15s ease; }
+.tree-doc-row:hover .doc-row-actions,
+.tree-doc-row:focus-within .doc-row-actions { opacity: 1; }
 .move-actions {
   display: inline-flex;
   flex-direction: column;
@@ -533,7 +545,17 @@ a:hover { color: var(--primary-hover); }
 .row-action-btn:hover { background: var(--primary-soft); color: var(--primary); }
 .row-action-btn.danger:hover { background: var(--danger-soft); color: var(--danger); }
 
-.tree-children { margin-left: 16px; }
+.tree-children {
+  margin-left: 16px;
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  transition: max-height 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease;
+}
+.tree-children.expanded {
+  max-height: 5000px;
+  opacity: 1;
+}
 
 .tree-doc-row {
   position: relative;
@@ -552,9 +574,11 @@ a:hover { color: var(--primary-hover); }
   font-size: 14px;
   color: var(--text);
   user-select: none;
+  transition: background 0.12s ease;
 }
 .tree-doc-row:hover { background: var(--hover-soft); }
-/* 悬浮排序按钮出现在右侧时给标题让位，避免文字被遮�?*/
+.tree-doc-row.pressing { background: var(--hover-soft); }
+/* 悬浮排序按钮出现在右侧时给标题让位，避免文字被遮挡 */
 .tree-doc-row:hover .tree-doc-title,
 .tree-doc-row:focus-within .tree-doc-title { padding-right: 48px; }
 .tree-doc-row.active {
@@ -705,6 +729,34 @@ a:hover { color: var(--primary-hover); }
 
 /* 分屏预览区底色与源码区一�?*/
 .vditor-mount .vditor-sv { background: var(--panel); }
+
+/* Vditor 初始化加载态 */
+.vditor-loading {
+  position: absolute;
+  inset: 12px 16px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  font-size: 14px;
+  z-index: 10;
+}
+.loading-spinner {
+  width: 28px;
+  height: 28px;
+  border: 2.5px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
 
 /* ---------------- 抽屉（版本历史） ---------------- */
 
@@ -1116,6 +1168,17 @@ textarea.field-input {
 .toast.toast-error { border-color: rgba(213, 50, 63, 0.45); }
 .toast.toast-error .icon { color: var(--danger); }
 .toast.leaving { opacity: 0; transform: translateY(-8px); transition: opacity 0.25s, transform 0.25s; }
+.toast-progress {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  border-radius: 0 0 12px 12px;
+  background: currentColor;
+  opacity: 0.3;
+  width: 0%;
+  transform-origin: left center;
+}
 
 /* ---------------- 动画 ---------------- */
 
@@ -1208,27 +1271,46 @@ body.col-resizing { cursor: col-resize !important; user-select: none; }
 /* ---------------- 编辑�?/ 预览区分屏分隔条（插�?Vditor 内部�?---------------- */
 
 .pd-split-handle {
-  width: 9px;
-  margin: 0 -4px;
+  width: 16px;
+  margin: 0 -8px;
   flex-shrink: 0;
   cursor: col-resize;
   position: relative;
   z-index: 6;
   background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .pd-split-handle::after {
   content: "";
   position: absolute;
-  left: 4px;
+  left: 50%;
   top: 0;
   bottom: 0;
   width: 1px;
   background: var(--border-strong);
+  transform: translateX(-50%);
   transition: width 0.12s, background 0.12s;
+}
+.pd-split-handle::before {
+  content: "";
+  width: 3px;
+  height: 30px;
+  background: var(--border-strong);
+  border-radius: 2px;
+  opacity: 0.5;
+  transition: opacity 0.12s, background 0.12s, width 0.12s;
+  pointer-events: none;
+}
+.pd-split-handle:hover::before,
+.pd-split-handle.dragging::before {
+  opacity: 1;
+  background: var(--primary);
+  width: 5px;
 }
 .pd-split-handle:hover::after, .pd-split-handle.dragging::after {
   width: 3px;
-  left: 3px;
   background: var(--primary);
 }
 
