@@ -22,11 +22,9 @@ const KEY_FAVICON = "favicon";
 const KEY_LOGO = "logo";
 const KEY_NOTICE = "notice";
 const KEY_FOOTER = "footer_html";
-const KEY_DEFAULT_LANG = "default_lang";
-const KEY_SUPPORTED_LANGS = "supported_langs";
 
 /** 全部设置键（读取时一次取回） */
-const ALL_KEYS = [KEY_SITE_NAME, KEY_HOME_URL, KEY_NAV_LINKS, KEY_FAVICON, KEY_LOGO, KEY_NOTICE, KEY_FOOTER, KEY_DEFAULT_LANG, KEY_SUPPORTED_LANGS];
+const ALL_KEYS = [KEY_SITE_NAME, KEY_HOME_URL, KEY_NAV_LINKS, KEY_FAVICON, KEY_LOGO, KEY_NOTICE, KEY_FOOTER];
 
 export const DEFAULT_SITE_NAME = "Pages Docs";
 
@@ -38,8 +36,6 @@ export interface ResolvedSiteSettings {
   logo: string | null;
   notice: NoticeBar | null;
   footer: string | null;
-  defaultLang: string;
-  supportedLangs: string[];
 }
 
 /**
@@ -267,40 +263,6 @@ export function validateSettingsUpdate(
     }
   }
 
-  if (input.default_lang !== undefined) {
-    if (input.default_lang === null) {
-      value.default_lang = null;
-    } else {
-      const lang = String(input.default_lang).trim().toLowerCase();
-      if (lang.length === 0) {
-        value.default_lang = null;
-      } else if (!/^[a-z]{2}(-[A-Z]{2})?$/.test(lang)) {
-        return { ok: false, error: "默认语言格式不合法（如 en、zh-CN）" };
-      } else {
-        value.default_lang = lang;
-      }
-    }
-  }
-
-  if (input.supported_langs !== undefined) {
-    if (input.supported_langs === null) {
-      value.supported_langs = null;
-    } else {
-      if (!Array.isArray(input.supported_langs)) return { ok: false, error: "支持的语言必须是数组" };
-      const langs: string[] = [];
-      for (const lang of input.supported_langs) {
-        const l = String(lang).trim().toLowerCase();
-        if (l.length === 0) continue;
-        if (!/^[a-z]{2}(-[A-Z]{2})?$/.test(l)) {
-          return { ok: false, error: `语言代码「${l}」格式不合法（如 en、zh-CN）` };
-        }
-        if (!langs.includes(l)) langs.push(l);
-      }
-      if (langs.length === 0) return { ok: false, error: "至少需要一种支持的语言" };
-      value.supported_langs = langs;
-    }
-  }
-
   return { ok: true, value };
 }
 
@@ -334,18 +296,8 @@ export async function loadSiteSettings(
   const logo = stored[KEY_LOGO]?.trim() || null;
   const notice = parseNotice(stored[KEY_NOTICE] ?? null);
   const footer = stored[KEY_FOOTER]?.trim() || null;
-  const defaultLang = stored[KEY_DEFAULT_LANG]?.trim() || "en";
-  let supportedLangs: string[] = ["en"];
-  try {
-    const parsed = JSON.parse(stored[KEY_SUPPORTED_LANGS] ?? "[]");
-    if (Array.isArray(parsed) && parsed.length > 0) {
-      supportedLangs = parsed.filter((l: unknown) => typeof l === "string" && /^[a-z]{2}(-[A-Z]{2})?$/.test(l));
-    }
-  } catch {
-    // 忽略解析错误
-  }
 
-  return { siteName, homeUrl, navLinks, favicon, logo, notice, footer, defaultLang, supportedLangs };
+  return { siteName, homeUrl, navLinks, favicon, logo, notice, footer };
 }
 
 function upsertSql(): string {
@@ -405,20 +357,6 @@ export async function saveSiteSettings(
       value.footer === null
         ? db.prepare("DELETE FROM site_settings WHERE key = ?").bind(KEY_FOOTER)
         : db.prepare(upsertSql()).bind(KEY_FOOTER, value.footer, updatedBy, now)
-    );
-  }
-  if (value.default_lang !== undefined) {
-    stmts.push(
-      value.default_lang === null
-        ? db.prepare("DELETE FROM site_settings WHERE key = ?").bind(KEY_DEFAULT_LANG)
-        : db.prepare(upsertSql()).bind(KEY_DEFAULT_LANG, value.default_lang, updatedBy, now)
-    );
-  }
-  if (value.supported_langs !== undefined) {
-    stmts.push(
-      value.supported_langs === null
-        ? db.prepare("DELETE FROM site_settings WHERE key = ?").bind(KEY_SUPPORTED_LANGS)
-        : db.prepare(upsertSql()).bind(KEY_SUPPORTED_LANGS, JSON.stringify(value.supported_langs), updatedBy, now)
     );
   }
 

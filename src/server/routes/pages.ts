@@ -6,7 +6,7 @@ import { excerptOf, renderMarkdown } from "../markdown";
 import { buildTree, type TreeNode } from "../tree";
 import { esc, renderDocPage, renderMessagePage, renderNotFoundPage, renderSearchPage, themeFromRequest } from "../layout";
 import { loadSiteSettings, type ResolvedSiteSettings } from "../settings";
-import { getDocByPath, getDocByPathFallback, listPublishedPaths } from "./documents";
+import { getDocByPath, listPublishedPaths } from "./documents";
 import { searchDocuments } from "./search";
 import { isReservedRoutePath } from "../../shared/reserved-paths";
 import type { DocumentSummary, FolderInfo } from "../../shared/types";
@@ -16,24 +16,7 @@ function baseUrlOf(env: AppEnv["Bindings"], url: URL): string {
   return configured || url.origin;
 }
 
-/** 从路径中解析语言前缀：/en/guide/intro -> { lang: "en", path: "guide/intro" } */
-function parseLangFromPath(rawPath: string, defaultLang: string, supportedLangs: string[]): { lang: string; path: string; hasPrefix: boolean } {
-  const segments = rawPath.split("/").filter(Boolean);
-  if (segments.length === 0) return { lang: defaultLang, path: "", hasPrefix: false };
-  const firstSeg = segments[0].toLowerCase();
-  if (supportedLangs.includes(firstSeg)) {
-    return { lang: firstSeg, path: segments.slice(1).join("/"), hasPrefix: true };
-  }
-  return { lang: defaultLang, path: rawPath, hasPrefix: false };
-}
-
-/** 构建带语言前缀的 URL 路径 */
-function buildLangPath(lang: string, path: string, defaultLang: string): string {
-  if (lang === defaultLang) return path ? `/${path}` : "/";
-  return `/${lang}${path ? `/${path}` : ""}`;
-}
-
-/** 站点设置（名称/首页地址/导航/品牌/语言）；DB 不可用时回退部署变量与默认值 */
+/** 站点设置（名称/首页地址/导航/品牌）；DB 不可用时回退部署变量与默认值 */
 async function loadSettings(env: AppEnv["Bindings"]): Promise<ResolvedSiteSettings> {
   return loadSiteSettings(env.DB, env.SITE_NAME);
 }
@@ -56,16 +39,14 @@ async function loadFolders(db: D1Database): Promise<FolderInfo[]> {
   }
 }
 
-async function loadPublishedDocs(db: D1Database, lang: string): Promise<DocumentSummary[]> {
+async function loadPublishedDocs(db: D1Database): Promise<DocumentSummary[]> {
   const { results } = await db
     .prepare(
-      "SELECT id, path, lang, title, status, sort_order, updated_by, updated_at FROM documents WHERE status = 'published' AND lang = ? ORDER BY path"
+      "SELECT id, path, title, status, sort_order, updated_by, updated_at FROM documents WHERE status = 'published' ORDER BY path"
     )
-    .bind(lang)
     .all<{
       id: number;
       path: string;
-      lang: string;
       title: string;
       status: string;
       sort_order: number;
@@ -75,7 +56,6 @@ async function loadPublishedDocs(db: D1Database, lang: string): Promise<Document
   return results.map((r) => ({
     id: r.id,
     path: r.path,
-    lang: r.lang,
     title: r.title,
     status: "published" as const,
     sort_order: r.sort_order ?? 0,
@@ -85,15 +65,13 @@ async function loadPublishedDocs(db: D1Database, lang: string): Promise<Document
 }
 
 /** 登录用户的侧栏额外包含草稿（带徽章）；匿名只查 published，避免多拉数据 */
-async function loadVisibleDocs(db: D1Database, loggedIn: boolean, lang: string): Promise<DocumentSummary[]> {
-  if (!loggedIn) return loadPublishedDocs(db, lang);
+async function loadVisibleDocs(db: D1Database, loggedIn: boolean): Promise<DocumentSummary[]> {
+  if (!loggedIn) return loadPublishedDocs(db);
   const { results } = await db
-    .prepare("SELECT id, path, lang, title, status, sort_order, updated_by, updated_at FROM documents WHERE lang = ? ORDER BY path")
-    .bind(lang)
+    .prepare("SELECT id, path, title, status, sort_order, updated_by, updated_at FROM documents ORDER BY path")
     .all<{
       id: number;
       path: string;
-      lang: string;
       title: string;
       status: string;
       sort_order: number;
@@ -103,7 +81,6 @@ async function loadVisibleDocs(db: D1Database, loggedIn: boolean, lang: string):
   return results.map((r) => ({
     id: r.id,
     path: r.path,
-    lang: r.lang,
     title: r.title,
     status: r.status === "published" ? ("published" as const) : ("draft" as const),
     sort_order: r.sort_order ?? 0,
@@ -121,7 +98,8 @@ function isReservedDocPath(path: string): boolean {
   return isReservedRoutePath(path);
 }
 
-async function notFound(env: AppEnv["Bindings"], req: Request, url: URL, path: string, settings: ResolvedSiteSettings): Promise<Response> {
+async function notFound(env: AppEnv["Bindings"], req: Request, url: URL, path: string): Promise<Response> {
+  const settings = await loadSettings(env);
   const html = renderNotFoundPage({
     siteName: settings.siteName,
     baseUrl: baseUrlOf(env, url),
@@ -137,48 +115,24 @@ async function notFound(env: AppEnv["Bindings"], req: Request, url: URL, path: s
 }
 
 export function registerPagesRoutes(app: Hono<AppEnv>): void {
-  // 语言检测中间件：为所有阅读页路由提取语言
-  const langMiddleware = async (c: any, next: any) => {
-    const env = c.env;
-    if (!env.DB) return c.redirect("/setup", 302);
-    const settings = await loadSettings(env);
-    const defaultLang = settings.defaultLang;
-    const supportedLangs = settings.supportedLangs;
-
-    const rawPath = c.req.path.replace(/^\/+/, "");
-    // 保留路径直接放行
-    if (isReservedDocPath(rawPath)) return next();
-
-    const { lang, path, hasPrefix } = parseLangFromPath(rawPath, defaultLang, supportedLangs);
-
-    // 如果是默认语言但带了前缀（理论上不该发生），重定向去掉前缀
-    if (hasPrefix && lang === defaultLang) {
-      const target = new URL(c.req.url);
-      target.pathname = buildLangPath(defaultLang, path, defaultLang);
-      return c.redirect(target.toString(), 302);
-    }
-
-    // 存储语言信息供后续处理使用
-    c.set("i18n", { lang, path, hasPrefix, defaultLang, supportedLangs, settings });
-    await next();
-  };
-
-  // GET / —— 站点入口：按语言重定向到首页或第一篇文档
-  app.get("/", langMiddleware, async (c) => {
+  // GET / —— 站点入口：优先跳转站点设置的「首页地址」（访客直接访问根路径时的默认落地页）；
+  // 未配置时回退到第一篇已发布文档；无文档时显示引导页（PLAN 4.6 引导态）
+  app.get("/", async (c) => {
     const env = c.env;
     const url = new URL(c.req.url);
-    const i18n = c.get("i18n")!;
-    const { lang, defaultLang, supportedLangs, settings } = i18n;
+    const settings = await loadSettings(env);
     const home = settings.homeUrl.trim();
     if (home.length > 0 && home !== "/") return c.redirect(home, 302);
     let firstPath: string | null = null;
-    try {
-      const paths = await listPublishedPaths(env.DB, lang);
-      firstPath = paths.sort()[0] ?? null;
-    } catch {
-      firstPath = null;
+    if (env.DB) {
+      try {
+        const paths = await listPublishedPaths(env.DB);
+        firstPath = paths.sort()[0] ?? null;
+      } catch {
+        firstPath = null;
+      }
     }
-    if (firstPath) return c.redirect(buildLangPath(lang, firstPath, defaultLang), 302);
+    if (firstPath) return c.redirect(`/${firstPath}`, 302);
     const html = renderMessagePage({
       siteName: settings.siteName,
       baseUrl: baseUrlOf(env, url),
@@ -193,18 +147,25 @@ export function registerPagesRoutes(app: Hono<AppEnv>): void {
     return c.html(html);
   });
 
-  // GET /search —— 公开搜索页（带语言前缀）
-  app.get("/search", langMiddleware, async (c) => {
+  // 旧 /docs/* 链接的兼容跳转已并入通配阅读路由：
+  // 仅当对应路径没有真实文档时才剥离前缀跳转，用户自建的 docs 目录不受影响。
+
+  // GET *path —— 阅读页（PLAN 4.2；文档路径直接映射到站点根路径）
+  // 注意：必须在本函数内所有具名路由之后注册（见文件末尾），否则会遮蔽它们。
+  registerReadingPage(app);
+
+  // GET /search —— 公开搜索页
+  app.get("/search", async (c) => {
     const env = c.env;
-    const url = new URL(c.req.url);
-    const i18n = c.get("i18n")!;
-    const { lang, defaultLang, supportedLangs, settings } = i18n;
+    if (!env.DB) return c.redirect("/setup", 302);
     const q = (c.req.query("q") ?? "").trim().slice(0, 100);
     const started = Date.now();
-    const hits = q ? await searchDocuments(env.DB, q, lang) : [];
+    const hits = q ? await searchDocuments(env.DB, q) : [];
+    const url = new URL(c.req.url);
     const user = await getSessionUser(env, c.req.raw);
-    const docs = await loadVisibleDocs(env.DB, user !== null, lang);
+    const docs = await loadVisibleDocs(env.DB, user !== null);
     const folders = await loadFolders(env.DB);
+    const settings = await loadSettings(env);
     const html = renderSearchPage({
       siteName: settings.siteName,
       homeUrl: settings.homeUrl,
@@ -220,30 +181,24 @@ export function registerPagesRoutes(app: Hono<AppEnv>): void {
       hits,
       tookMs: Date.now() - started,
       tree: buildTree(docs, folders),
-      currentLang: lang,
-      supportedLangs,
-      defaultLang,
     });
     return c.html(html);
   });
 
-  // GET /sitemap.xml —— 从 D1 动态生成（多语言）
+  // GET /sitemap.xml —— 从 D1 动态生成（PLAN 1）
   app.get("/sitemap.xml", async (c) => {
     const env = c.env;
     if (!env.DB) return c.text("service unavailable", 503);
-    const settings = await loadSettings(env);
+    const docs = await loadPublishedDocs(env.DB);
     const base = baseUrlOf(env, new URL(c.req.url));
-    const urls: string[] = [];
-    for (const lang of settings.supportedLangs) {
-      const docs = await loadPublishedDocs(env.DB, lang);
-      urls.push(`  <url><loc>${base}${buildLangPath(lang, "", settings.defaultLang)}</loc></url>`);
-      for (const d of docs) {
-        urls.push(
-          `  <url><loc>${base}${buildLangPath(lang, d.path, settings.defaultLang)}</loc><lastmod>${new Date(d.updated_at).toISOString()}</lastmod></url>`
-        );
-      }
-    }
-    return c.body(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join("\n")}\n</urlset>`, 200, {
+    const urls = [
+      `  <url><loc>${base}/</loc></url>`,
+      ...docs.map(
+        (d) =>
+          `  <url><loc>${base}/${esc(d.path)}</loc><lastmod>${new Date(d.updated_at).toISOString()}</lastmod></url>`
+      ),
+    ].join("\n");
+    return c.body(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>`, 200, {
       "Content-Type": "application/xml; charset=utf-8",
       "Cache-Control": "public, max-age=3600",
     });
@@ -265,59 +220,76 @@ export function registerPagesRoutes(app: Hono<AppEnv>): void {
     return c.body(body, 200, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=3600" });
   });
 
-  // GET /feed.xml —— RSS 2.0（最近更新的 20 篇已发布文档，按语言分组）
+  // GET /feed.xml —— RSS 2.0（最近更新的 20 篇已发布文档）
   app.get("/feed.xml", async (c) => {
     const env = c.env;
     if (!env.DB) return c.text("service unavailable", 503);
-    const settings = await loadSettings(env);
     const base = baseUrlOf(env, new URL(c.req.url));
-    const siteName = settings.siteName;
-    const items: string[] = [];
-    for (const lang of settings.supportedLangs) {
-      const docs = (await loadPublishedDocs(env.DB, lang)).sort((a, b) => b.updated_at - a.updated_at).slice(0, 20);
-      for (const d of docs) {
-        const record = await getDocByPath(env.DB, d.path, lang);
-        const md = record?.publishedContent ?? "";
-        items.push(`    <item>
+    const siteName = (await loadSettings(env)).siteName;
+    const docs = (await loadPublishedDocs(env.DB)).sort((a, b) => b.updated_at - a.updated_at).slice(0, 20);
+    const items = (
+      await Promise.all(
+        docs.map(async (d) => {
+          const record = await getDocByPath(env.DB, d.path);
+          const md = record?.publishedContent ?? "";
+          return `    <item>
       <title>${esc(d.title)}</title>
-      <link>${base}${buildLangPath(lang, d.path, settings.defaultLang)}</link>
-      <guid isPermaLink="true">${base}${buildLangPath(lang, d.path, settings.defaultLang)}</guid>
+      <link>${base}/${esc(d.path)}</link>
+      <guid isPermaLink="true">${base}/${esc(d.path)}</guid>
       <pubDate>${new Date(d.updated_at).toUTCString()}</pubDate>
       <description>${esc(excerptOf(md, 300))}</description>
-    </item>`);
-      }
-    }
+    </item>`;
+        })
+      )
+    ).join("\n");
     return c.body(
       `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0"><channel>
     <title>${esc(siteName)}</title>
     <link>${base}/</link>
     <description>${esc(siteName)} 最近更新</description>
-${items.join("\n")}
+${items}
 </channel></rss>`,
       200,
       { "Content-Type": "application/rss+xml; charset=utf-8", "Cache-Control": "public, max-age=1800" }
     );
   });
+}
 
-  // GET *path —— 阅读页（多语言版本）
-  app.get("*", langMiddleware, async (c, next) => {
+/**
+ * GET *path —— 阅读页（PLAN 4.2；文档路径直接映射到站点根路径）。
+ * 通配路由必须最后注册：具名路由（/、/search、sitemap/robots/feed，
+ * 以及更早在 index.ts 注册的 /admin、/api/*、/f/*、/icon/* 等）优先匹配；
+ * 命中保留前缀时调用 next()，交给框架 notFound（/api/* 因此仍返回 JSON 错误）。
+ */
+function registerReadingPage(app: Hono<AppEnv>): void {
+  app.get("*", async (c, next) => {
     const env = c.env;
-    const i18n = c.get("i18n")!;
-    const { lang, path, hasPrefix, defaultLang, supportedLangs, settings } = i18n;
+    if (!env.DB) return c.redirect("/setup", 302);
+    const rawPath = c.req.path.replace(/^\/+/, "");
+    if (isReservedDocPath(rawPath)) return next();
+
+    let path: string;
+    try {
+      path = decodeURIComponent(rawPath).replace(/\/+$/, "");
+    } catch {
+      return notFound(env, c.req.raw, new URL(c.req.url), rawPath);
+    }
+    if (!path) return c.redirect("/", 302);
+
     const url = new URL(c.req.url);
     const user = await getSessionUser(env, c.req.raw);
     const isAnonymous = user === null;
+    // 显式主题选择不走页面缓存：缓存键不含主题，带 Cookie 的请求必须实时渲染
+    // 才能带上正确的 data-theme；未显式选择的请求继续吃缓存，
+    // 由 CSS 的 prefers-color-scheme 自动适配系统深浅色。
     const explicitTheme = themeFromRequest(c.req.raw);
-
-    // 缓存键包含语言
-    const cacheKey = `${lang}:${path}`;
 
     // ---- 匿名请求走缓存；登录请求永远 live 渲染且 no-store ----
     // ?format=md（复制源码）不读 HTML 缓存，统一走下方实时输出
     if (isAnonymous && !url.searchParams.has("view") && !explicitTheme && url.searchParams.get("format") !== "md") {
       if (env.PAGE_CACHE) {
-        const cached = await getPageCache(env, cacheKey);
+        const cached = await getPageCache(env, path);
         if (cached) {
           if (c.req.header("If-None-Match") === cached.etag) {
             return new Response(null, {
@@ -339,29 +311,22 @@ ${items.join("\n")}
       }
     }
 
-    // 空路径重定向到首页
-    if (!path) return c.redirect(buildLangPath(lang, "", defaultLang), 302);
-
-    // 查找文档（带语言回退）
-    const record = await getDocByPathFallback(env.DB, path, lang, defaultLang);
+    const record = await getDocByPath(env.DB, path);
     if (!record) {
-      // 兼容旧版 /docs/* 链接
+      // 兼容旧版 /docs/* 链接：仅当该路径下没有真实文档时才剥离前缀跳转。
+      // 用户自建的 docs 目录（如 docs/intro）优先按文档解析，不再被剥离 /docs 前缀。
+      // 用 302 而非 301：跳转与否取决于实时数据，避免浏览器把临时判定缓存成永久规则。
       if (/^docs(\/|$)/i.test(path)) {
         const target = new URL(c.req.url);
-        target.pathname = buildLangPath(lang, path.replace(/^docs\/?/i, ""), defaultLang);
+        target.pathname = `/${path.replace(/^docs\/?/i, "")}`;
         return c.redirect(target.toString(), 302);
       }
-      return notFound(env, c.req.raw, url, path, settings);
+      return notFound(env, c.req.raw, url, path);
     }
-    const { row, publishedContent, fallback } = record;
+    const { row, publishedContent } = record;
 
     // 权限：草稿仅登录可见（PLAN 1）
-    if (row.status !== "published" && !user) return notFound(env, c.req.raw, url, path, settings);
-
-    // 如果发生了语言回退，在页面顶部显示提示（可选：通过模板传递）
-    const langFallbackNotice = fallback && lang !== defaultLang
-      ? `<div class="lang-fallback-banner">此页面暂无 ${lang} 版本，正在显示 ${defaultLang} 版本。<a href="${buildLangPath(defaultLang, path, defaultLang)}">查看原版</a></div>`
-      : "";
+    if (row.status !== "published" && !user) return notFound(env, c.req.raw, url, path);
 
     // 内容选择：登录用户默认预览最新草稿；匿名只见发布快照
     let sourceMd: string;
@@ -390,19 +355,14 @@ ${items.join("\n")}
     }
 
     const { html: contentHtml, toc } = renderMarkdown(sourceMd);
-    const visibleDocs = await loadVisibleDocs(env.DB, !isAnonymous, lang);
+    const visibleDocs = await loadVisibleDocs(env.DB, !isAnonymous);
     const folders = await loadFolders(env.DB);
     const tree: TreeNode[] = buildTree(visibleDocs, folders);
-
-    // 获取该文档在其他语言下的可用版本（用于 hreflang）
-    const { results: langRows } = await env.DB
-      .prepare("SELECT lang FROM documents WHERE path = ? AND status = 'published'")
-      .bind(path)
-      .all<{ lang: string }>();
-    const availableLangs = langRows.map((r) => r.lang);
-
+    const settings = await loadSettings(env);
     const draftPreviewBanner = previewingDraft
-      ? `<div class="draft-banner">正在预览未发布的修改 · <a href="?view=published">查看已发布版本</a> · <a href="/admin/#/doc-by-path/${encodeURIComponent(path)}?lang=${lang}">去编辑</a></div>`
+      ? `<div class="draft-banner">正在预览未发布的修改 · <a href="?view=published">查看已发布版本</a> · <a href="/admin/#/doc-by-path/${encodeURIComponent(
+          path
+        )}">去编辑</a></div>`
       : "";
 
     const html = renderDocPage({
@@ -415,21 +375,16 @@ ${items.join("\n")}
       footer: settings.footer,
       theme: themeFromRequest(c.req.raw),
       baseUrl: baseUrlOf(env, url),
-      path: buildLangPath(lang, path, defaultLang),
+      path,
       title: row.title,
       status: row.status === "published" ? "published" : "draft",
       updatedAt: row.updated_at,
       updatedBy: row.updated_by,
-      contentHtml: langFallbackNotice + draftPreviewBanner + contentHtml,
+      contentHtml: draftPreviewBanner + contentHtml,
       toc,
       tree,
       user,
       excerpt: excerptOf(sourceMd),
-      currentLang: lang,
-      supportedLangs,
-      defaultLang,
-      availableLangs,
-      canonicalPath: buildLangPath(lang, path, defaultLang),
     });
 
     // 匿名 + 无显式主题 → 可缓存；带显式主题的响应不写入缓存（避免主题被固化）
@@ -442,7 +397,7 @@ ${items.join("\n")}
       };
       if (c.req.header("If-None-Match") === etag) return new Response(null, { status: 304, headers });
       if (env.PAGE_CACHE) {
-        void putPageCache(env, cacheKey, { etag, html, generatedAt: Date.now() });
+        void putPageCache(env, path, { etag, html, generatedAt: Date.now() });
       } else {
         const res = new Response(html, { headers });
         void putToCacheApi(c.req.raw, res.clone());

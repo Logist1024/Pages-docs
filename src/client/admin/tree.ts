@@ -122,10 +122,7 @@ function buildTree(docs: DocumentSummary[]): FolderNode {
 
   // 先建显式目录（保证空目录也出现），再挂文档
   for (const folderPath of allFolderPaths()) ensureFolder(folderPath);
-  
-  // 只显示当前语言的文档
-  const currentLangDocs = docs.filter((d) => d.lang === state.currentLang);
-  for (const doc of currentLangDocs) {
+  for (const doc of docs) {
     const segments = doc.path.split("/").filter((s) => s.length > 0);
     const fileName = segments.pop();
     if (fileName === undefined) continue;
@@ -727,7 +724,7 @@ export function openNewDocModal(folder = ""): void {
             continue;
           }
           try {
-            const detail = await api.createDoc({ path: candidate, title, lang: state.currentLang });
+            const detail = await api.createDoc({ path: candidate, title });
             toast(`已创建「${detail.title}」`, "success");
             handle.close();
             expandAncestors(detail.path);

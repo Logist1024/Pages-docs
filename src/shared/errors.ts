@@ -68,8 +68,6 @@ export const ERROR_CODES = {
   DOC_INVALID_PATH: { status: 400, message: "path 只允许小写字母/数字/-/_，用 / 分层" },
   /** 目标 path 已被其他文档占用 */
   DOC_PATH_TAKEN: { status: 409, message: "该 path 已存在" },
-  /** 语言代码格式不合法 */
-  DOC_INVALID_LANG: { status: 400, message: "语言代码格式不合法（如 en、zh-CN）" },
   /** 更新请求没有携带任何可变更字段 */
   DOC_NO_FIELDS: { status: 400, message: "没有需要更新的字段" },
   /**

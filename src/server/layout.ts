@@ -69,14 +69,6 @@ export interface BaseLayoutOptions {
   favicon?: string | null;
   /** 页脚自定义 HTML（版权声明等）；空不渲染。内容为 admin 受信输入，渲染前经安全过滤 */
   footer?: string | null;
-  /** 当前页面语言代码（如 en、zh-CN） */
-  lang?: string;
-  /** 支持的语言列表 */
-  supportedLangs?: string[];
-  /** 默认语言代码 */
-  defaultLang?: string;
-  /** 当前页面可用的语言版本（用于 hreflang） */
-  availableLangs?: string[];
 }
 
 /** 页脚片段：admin 配置的受信 HTML，经 sanitizeTrustedHtml 过滤后输出 */
@@ -92,32 +84,14 @@ export function baseLayout(opts: BaseLayoutOptions): string {
   const description =
     opts.description ?? `${opts.siteName} · 在线产品文档：匿名可读，登录后在线编辑。`;
   const themeAttr = opts.theme ? ` data-theme="${esc(opts.theme)}"` : "";
-  const htmlLang = opts.lang ?? "zh-CN";
-  
-  // 生成 hreflang 标签
-  let hreflangTags = "";
-  if (opts.canonicalPath && opts.supportedLangs && opts.supportedLangs.length > 0) {
-    const defaultLang = opts.defaultLang ?? "en";
-    for (const lang of opts.supportedLangs) {
-      const href = opts.availableLangs?.includes(lang) 
-        ? `${opts.baseUrl}${buildLangPath(lang, opts.canonicalPath.replace(/^\//, ""), defaultLang)}`
-        : `${opts.baseUrl}${buildLangPath(defaultLang, opts.canonicalPath.replace(/^\//, ""), defaultLang)}`;
-      hreflangTags += `<link rel="alternate" hreflang="${esc(lang)}" href="${esc(href)}">\n`;
-    }
-    // x-default 指向默认语言版本
-    const defaultHref = `${opts.baseUrl}${buildLangPath(defaultLang, opts.canonicalPath.replace(/^\//, ""), defaultLang)}`;
-    hreflangTags += `<link rel="alternate" hreflang="x-default" href="${esc(defaultHref)}">\n`;
-  }
-
   return `<!doctype html>
-<html lang="${esc(htmlLang)}"${themeAttr}>
+<html lang="zh-CN"${themeAttr}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(opts.title)}</title>
 <meta name="description" content="${esc(description)}">
 ${canonical ? `<link rel="canonical" href="${esc(canonical)}">` : ""}
-${hreflangTags}
 <meta property="og:type" content="article">
 <meta property="og:site_name" content="${esc(opts.siteName)}">
 <meta property="og:title" content="${esc(opts.title)}">
@@ -134,12 +108,6 @@ ${footerHtml(opts.footer)}
 </html>`;
 }
 
-/** 构建带语言前缀的 URL 路径（供 hreflang 使用） */
-function buildLangPath(lang: string, path: string, defaultLang: string): string {
-  if (lang === defaultLang) return path ? `/${path}` : "/";
-  return `/${lang}${path ? `/${path}` : ""}`;
-}
-
 export interface SiteHeaderOptions {
   siteName: string;
   homeUrl: string;
@@ -152,14 +120,6 @@ export interface SiteHeaderOptions {
   user: SessionUser | null;
   /** 自定义 LOGO 图（data URI 或站内路径）；缺省用内置 LOGO */
   logo?: string | null;
-  /** 当前语言代码 */
-  currentLang?: string;
-  /** 支持的语言列表 */
-  supportedLangs?: string[];
-  /** 默认语言代码 */
-  defaultLang?: string;
-  /** 当前页面可用的语言版本 */
-  availableLangs?: string[];
 }
 
 /** 导航高亮：站内链接与当前路径完全相等，或当前路径位于该前缀之下 */
@@ -192,7 +152,7 @@ function externalNavIcons(href: string): { icon: string; arrow: string } {
 
 /**
  * 站点顶部工具栏（全宽、最高层级）：品牌（链接到可配置首页地址）+ 搜索框（左侧）+
- * 一排导航栏（右侧，加粗，后台可配置）+ 深浅色切换 + 语言切换器。
+ * 一排导航栏（右侧，加粗，后台可配置）+ 深浅色切换。
  * 匿名访客在导航尾部保留低调「登录」入口。公告栏独立由 noticeBarHtml 渲染在内容区上方。
  */
 export function siteHeaderHtml(o: SiteHeaderOptions): string {
@@ -222,24 +182,6 @@ export function siteHeaderHtml(o: SiteHeaderOptions): string {
       <span class="theme-icon theme-icon-sun">${iconSun(16)}</span>
       <span class="theme-icon theme-icon-moon">${iconMoon(16)}</span>
     </button>`;
-  
-  // 语言切换器
-  const langSwitcher = (() => {
-    if (!o.supportedLangs || o.supportedLangs.length <= 1) return "";
-    const current = o.currentLang ?? o.defaultLang ?? "en";
-    const options = o.supportedLangs.map((lang) => {
-      const isCurrent = lang === current;
-      const label = lang === "en" ? "English" : lang === "zh-CN" ? "中文" : lang;
-      return `<option value="${esc(lang)}"${isCurrent ? " selected" : ""}>${esc(label)}</option>`;
-    }).join("");
-    return `<div class="lang-switcher">
-      <label for="lang-select" class="sr-only">选择语言</label>
-      <select id="lang-select" class="lang-select" onchange="window.location.href=this.value">
-        ${options}
-      </select>
-    </div>`;
-  })();
-
   // 移动端折叠控件（checkbox-hack：纯 CSS 开合，JS 只做 Esc 关闭 / 滚动锁等增强）。
   // DOM 顺序约束：checkbox 必须位于其控制的目标之前，兄弟选择器 ~ 才能命中。
   const collapseContent = `${search}${nav}`;
@@ -258,7 +200,6 @@ export function siteHeaderHtml(o: SiteHeaderOptions): string {
     <a class="site-name" href="${esc(o.homeUrl || "/")}">${brand}<span>${esc(o.siteName)}</span></a>
     ${navToggle}
     <div class="header-collapse">${collapseContent}</div>
-    ${langSwitcher}
     ${themeToggle}
   </div>
 </header>`;
@@ -279,8 +220,7 @@ export function noticeBarHtml(notice: NoticeBar | null | undefined): string {
     </div>`;
 }
 
-function sidebarHtml(tree: TreeNode[], activePath: string | null, defaultLang: string = "en", currentLang: string = "en"): string {  
-  const renderNodes = (nodes: TreeNode[]): string =>
+function sidebarHtml(tree: TreeNode[], activePath: string | null): string {  const renderNodes = (nodes: TreeNode[]): string =>
     nodes
       .map((node) => {
         // 目录显示名称：显式目录（后台命名，任意语言）优先，否则回退为路径段
@@ -291,16 +231,9 @@ function sidebarHtml(tree: TreeNode[], activePath: string | null, defaultLang: s
           )}</ul></details></li>`;
         }
         if (node.doc) {
-          // 对比时使用不带语言前缀的路径
-          const docPath = node.doc.path;
-          const cls = docPath === activePath ? " active" : "";
+          const cls = node.doc.path === activePath ? " active" : "";
           const badge = node.doc.status === "draft" ? '<span class="badge-draft">草稿</span>' : "";
-          // 使用语言前缀构建链接
-          const docLang = node.doc.lang ?? currentLang;
-          const href = docLang === defaultLang 
-            ? `/${esc(docPath)}` 
-            : `/${esc(docLang)}/${esc(docPath)}`;
-          let html = `<li class="tree-doc"><a class="tree-link${cls}" href="${href}">${esc(
+          let html = `<li class="tree-doc"><a class="tree-link${cls}" href="/${esc(node.doc.path)}">${esc(
             node.doc.title
           )}${badge}</a>`;
           if (node.children.length > 0) {
@@ -314,7 +247,6 @@ function sidebarHtml(tree: TreeNode[], activePath: string | null, defaultLang: s
         )}</ul></details></li>`;
       })
       .join("");
-  
   // 移动端抽屉控件：checkbox 由页眉「目录」按钮（label for）触发开合，
   // backdrop label 点击即取消勾选实现关闭；桌面端两者 display:none 不参与网格布局。
   return `<input type="checkbox" id="pd-sb-toggle" class="sb-toggle-box" tabindex="-1">
@@ -354,44 +286,31 @@ export interface DocPageOptions {
   favicon?: string | null;
   footer?: string | null;
   theme?: "light" | "dark" | null;
-  /** 当前语言代码 */
-  currentLang?: string;
-  /** 支持的语言列表 */
-  supportedLangs?: string[];
-  /** 默认语言代码 */
-  defaultLang?: string;
-  /** 当前页面可用的语言版本（用于 hreflang） */
-  availableLangs?: string[];
-  /** 规范路径（含语言前缀） */
-  canonicalPath?: string;
 }
 
 export function renderDocPage(o: DocPageOptions): string {
   const editLink =
     o.user !== null
-      ? `<a class="edit-link" href="/admin/#/doc-by-path/${encodeURIComponent(o.path)}?lang=${o.currentLang}">${iconPencil(14, "icon")}<span>编辑此页</span></a>`
+      ? `<a class="edit-link" href="/admin/#/doc-by-path/${encodeURIComponent(o.path)}">${iconPencil(14, "icon")}<span>编辑此页</span></a>`
       : "";
   const draftBanner =
     o.status === "draft"
-      ? `<div class="draft-banner">草稿预览 · 仅登录用户可见 · <a href="/admin/#/doc-by-path/${encodeURIComponent(o.path)}?lang=${o.currentLang}">去编辑</a></div>`
+      ? `<div class="draft-banner">草稿预览 · 仅登录用户可见 · <a href="/admin/#/doc-by-path/${encodeURIComponent(
+          o.path
+        )}">去编辑</a></div>`
       : "";
-  const canonicalPath = o.canonicalPath ?? `/${o.path}`;
   const content = `
 ${siteHeaderHtml({
   siteName: o.siteName,
   homeUrl: o.homeUrl ?? "/",
   nav: o.nav ?? [],
-  activePath: canonicalPath,
+  activePath: `/${o.path}`,
   showSearch: true,
   user: o.user,
   logo: o.logo,
-  currentLang: o.currentLang,
-  supportedLangs: o.supportedLangs,
-  defaultLang: o.defaultLang,
-  availableLangs: o.availableLangs,
 })}
 <div class="page-layout">
-  ${sidebarHtml(o.tree, canonicalPath, o.defaultLang ?? "en", o.currentLang ?? "en")}
+  ${sidebarHtml(o.tree, o.path)}
   <div class="main-column">
     ${noticeBarHtml(o.notice)}
     <div class="main-column-body">
@@ -411,7 +330,7 @@ ${siteHeaderHtml({
   return baseLayout({
     title: `${o.title} · ${o.siteName}`,
     description: o.excerpt,
-    canonicalPath,
+    canonicalPath: `/${o.path}`,
     baseUrl: o.baseUrl,
     siteName: o.siteName,
     content,
@@ -419,10 +338,6 @@ ${siteHeaderHtml({
     theme: o.theme,
     favicon: o.favicon,
     footer: o.footer,
-    lang: o.currentLang,
-    supportedLangs: o.supportedLangs,
-    defaultLang: o.defaultLang,
-    availableLangs: o.availableLangs,
   });
 }
 
@@ -441,45 +356,28 @@ export interface SearchPageOptions {
   favicon?: string | null;
   footer?: string | null;
   theme?: "light" | "dark" | null;
-  /** 当前语言代码 */
-  currentLang?: string;
-  /** 支持的语言列表 */
-  supportedLangs?: string[];
-  /** 默认语言代码 */
-  defaultLang?: string;
 }
 
 export function renderSearchPage(o: SearchPageOptions): string {
-  const defaultLang = o.defaultLang ?? "en";
-  const currentLang = o.currentLang ?? defaultLang;
   const items = o.hits
     .map(
-      (h) => {
-        const href = h.lang === defaultLang 
-          ? `/${esc(h.path)}` 
-          : `/${esc(h.lang)}/${esc(h.path)}`;
-        return `<li class="search-hit"><a href="${href}"><span class="hit-title">${esc(h.title)}</span>
-        <span class="hit-path">${href}</span>
-        <span class="hit-excerpt">${h.excerpt}</span></a></li>`;
-      }
+      (h) => `<li class="search-hit"><a href="/${esc(h.path)}"><span class="hit-title">${esc(h.title)}</span>
+      <span class="hit-path">/${esc(h.path)}</span>
+      <span class="hit-excerpt">${h.excerpt}</span></a></li>`
     )
     .join("");
-  const canonicalPath = `/search`;
   const content = `
 ${siteHeaderHtml({
   siteName: o.siteName,
   homeUrl: o.homeUrl ?? "/",
   nav: o.nav ?? [],
-  activePath: canonicalPath,
+  activePath: "/search",
   showSearch: true,
   user: o.user ?? null,
   logo: o.logo,
-  currentLang,
-  supportedLangs: o.supportedLangs,
-  defaultLang,
 })}
 <div class="page-layout">
-  ${sidebarHtml(o.tree, null, defaultLang, currentLang)}
+  ${sidebarHtml(o.tree, null)}
   <div class="main-column">
     ${noticeBarHtml(o.notice)}
     <div class="main-column-body">
@@ -504,9 +402,6 @@ ${siteHeaderHtml({
     theme: o.theme,
     favicon: o.favicon,
     footer: o.footer,
-    lang: currentLang,
-    supportedLangs: o.supportedLangs,
-    defaultLang,
   });
 }
 
